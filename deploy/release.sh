@@ -32,7 +32,14 @@ if [[ ! -e "$envfile" ]]; then
     mv "$tmp" "$envfile"
 fi
 compose=(docker compose --parallel 1 --env-file "$envfile")
-"${compose[@]}" -f compose.panel.yaml up -d --wait --wait-timeout 600
+panel_files=(-f compose.panel.yaml)
+if grep -Eq '^CADDY_NETWORK=[A-Za-z0-9_.-]+$' "$envfile"; then
+    panel_files+=(-f compose.gateway.yaml)
+elif grep -q '^CADDY_NETWORK=.' "$envfile"; then
+    echo 'Invalid Caddy network name'
+    exit 1
+fi
+"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 600
 if grep -Eq '^HIDDIFY_API_KEY=.+' "$envfile"; then
     "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 120
     echo 'Backend and PostgreSQL healthy'

@@ -1,0 +1,9 @@
+services:
+  panel:
+    networks:
+      gateway:
+        aliases: [gamelife-vpn-origin]
+networks:
+  gateway:
+    external: true
+    name: ${CADDY_NETWORK:?set the existing Caddy network}

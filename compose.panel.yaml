@@ -18,7 +18,9 @@ services:
       - panel:/opt/hiddify-manager/data
     ports:
       - "127.0.0.1:${PANEL_HTTPS_PORT:-28443}:443"
-    networks: [ingress, storage]
+    networks:
+      ingress: {}
+      storage: {}
     depends_on:
       mariadb:
         condition: service_healthy
