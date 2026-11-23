@@ -10,6 +10,7 @@ on:
         required: true
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: gamelife-vpn-deploy
   cancel-in-progress: false
@@ -22,6 +23,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Require a successful CI run for this commit
+        if: inputs.operation == 'deploy'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&status=success&per_page=1" --jq .total_count)"
+          if [[ "$count" -lt 1 ]]; then
+            echo 'The current commit has not passed Verify'
+            exit 1
+          fi
       - name: Deploy to the project directory on the VPS
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
