@@ -64,4 +64,5 @@ jobs:
           docker compose -f compose.panel.yaml -f compose.gateway.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
           docker run --rm --network "$CADDY_NETWORK" redis:7.4-alpine nc -z -w 5 gamelife-vpn-origin 80
+          python3 deploy/smoke_panel.py
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)
