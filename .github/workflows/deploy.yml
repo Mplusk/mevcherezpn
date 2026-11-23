@@ -37,8 +37,15 @@ jobs:
           umask 077
           printf '%s\n' "$SSH_KEY" > "$keydir/key"
           unset SSH_KEY
+          python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=p.read_bytes().replace(b"\r\n",b"\n"); b=b.replace(b"\\n",b"\n") if b.count(b"\n")<=1 and b"\\n" in b else b; p.write_bytes(b.rstrip(b"\n")+b"\n")' "$keydir/key"
           if ! ssh-keygen -y -P '' -f "$keydir/key" >/dev/null 2>&1; then
-            echo 'SSH key is invalid or requires a passphrase'
+            if grep -qE '^-----BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY-----$' "$keydir/key"; then
+              echo 'SSH private key could not be read; it may be incomplete or encrypted'
+            elif grep -qE '^ssh-(ed25519|rsa) ' "$keydir/key"; then
+              echo 'SSH secret contains a public key; a private key is required'
+            else
+              echo 'SSH secret does not contain a recognizable private key'
+            fi
             exit 1
           fi
           if ! ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
