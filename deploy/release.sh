@@ -10,6 +10,17 @@ exec 9>"$root/deploy.lock"
 flock -w 300 9
 envfile="$root/.env"
 if [[ ! -e "$envfile" ]]; then
+    command -v ss >/dev/null
+    for project in gamelife-hiddify gamelife-vpn; do
+        if docker ps -aq --filter "label=com.docker.compose.project=$project" | grep -q .; then
+            echo 'A Compose project with the intended name already exists'
+            exit 1
+        fi
+    done
+    if ss -H -lnt | awk '$4 ~ /:(18443|18090)$/ {found=1} END {exit !found}'; then
+        echo 'A required local port is already in use'
+        exit 1
+    fi
     tmp="$(mktemp "$root/.initial-env.XXXXXX")"
     {
         printf 'PANEL_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)"

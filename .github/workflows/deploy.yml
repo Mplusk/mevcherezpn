@@ -1,5 +1,13 @@
 name: Deploy
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Check server or deploy the verified revision
+        type: choice
+        options: [inspect, deploy]
+        default: inspect
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -11,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Deploy to the project directory on the VPS
@@ -19,18 +27,41 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
           : "${DEPLOY_HOST:?set the Actions secret DEPLOY_HOST}" "${DEPLOY_USER:?set DEPLOY_USER}" "${SSH_KEY:?set DEPLOY_SSH_PRIVATE_KEY}"
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$DEPLOY_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]
           keydir="$(mktemp -d)"
-          trap 'rm -f "$keydir/key" "$keydir/hosts"; rmdir "$keydir"' EXIT
+          trap 'rm -f "$keydir/key" "$keydir/hosts" "$keydir/result" "$keydir/error"; rmdir "$keydir"' EXIT
           umask 077
           printf '%s\n' "$SSH_KEY" > "$keydir/key"
           unset SSH_KEY
-          ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null
+          if ! ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
+            echo 'SSH host did not provide an ED25519 key'
+            exit 1
+          fi
           expected='SHA256:vraoI1+Yx3a6Yaw6I3yRi3uzJJg7KOZfq7O3GoEGVzc'
-          [[ "$(ssh-keygen -lf "$keydir/hosts" | awk '{print $2}' | sort -u)" == "$expected" ]]
+          if [[ "$(ssh-keygen -lf "$keydir/hosts" | awk '{print $2}' | sort -u)" != "$expected" ]]; then
+            echo 'SSH host key does not match the recorded fingerprint'
+            exit 1
+          fi
           ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
-          git archive "$GITHUB_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$GITHUB_SHA; cd services/gamelife-vpn/releases/$GITHUB_SHA; tar xf -; bash deploy/release.sh"
+          if [[ "$OPERATION" == inspect ]]; then
+            if ! ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < deploy/inspect.sh > "$keydir/result" 2> "$keydir/error"; then
+              echo 'Server inspection failed. Check SSH access and host requirements.'
+              exit 1
+            fi
+            grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
+          elif [[ "$OPERATION" == deploy ]]; then
+            if ! git archive "$GITHUB_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$GITHUB_SHA; cd services/gamelife-vpn/releases/$GITHUB_SHA; tar xf -; bash deploy/release.sh" \
+              > "$keydir/result" 2> "$keydir/error"; then
+              echo 'Deployment failed. Inspect the project directly on the server.'
+              exit 1
+            fi
+            grep -E '^(Backend and PostgreSQL healthy|Panel bootstrap complete\.)' "$keydir/result" || true
+          else
+            echo 'Unsupported operation'
+            exit 1
+          fi
