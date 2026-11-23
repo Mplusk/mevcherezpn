@@ -6,6 +6,7 @@ import re
 import socket
 import ssl
 import subprocess
+import time
 import uuid
 from urllib.parse import urlsplit
 
@@ -58,21 +59,31 @@ def main():
     ).stdout.strip()
     if not origin_ip:
         raise RuntimeError("Disposable panel is not connected to the proxy network")
-    http_origin = http.client.HTTPConnection(origin_ip, 80, timeout=30)
-    http_origin.request(
-        "GET",
-        f"/{admin_path}/api/v2/panel/info/",
-        headers={
-            "Host": hostname,
-            "Hiddify-API-Key": admin_key,
-            "X-Forwarded-Proto": "https",
-        },
-    )
-    origin_response = http_origin.getresponse()
-    origin_response.read()
-    if origin_response.status != 200:
-        raise RuntimeError(f"Panel HTTP origin returned HTTP {origin_response.status}")
-    http_origin.close()
+    deadline = time.monotonic() + 120
+    while True:
+        http_origin = http.client.HTTPConnection(origin_ip, 80, timeout=10)
+        try:
+            http_origin.request(
+                "GET",
+                f"/{admin_path}/api/v2/panel/info/",
+                headers={
+                    "Host": hostname,
+                    "Hiddify-API-Key": admin_key,
+                    "X-Forwarded-Proto": "https",
+                },
+            )
+            origin_response = http_origin.getresponse()
+            origin_response.read()
+            status = origin_response.status
+        except (OSError, http.client.HTTPException):
+            status = None
+        finally:
+            http_origin.close()
+        if status == 200:
+            break
+        if status not in (None, 502, 503, 504) or time.monotonic() >= deadline:
+            raise RuntimeError(f"Panel HTTP origin did not become ready (HTTP {status})")
+        time.sleep(3)
     connection = LocalPanelConnection(
         hostname,
         timeout=30,
