@@ -1,11 +1,26 @@
-# Use this site block in the existing Caddy after configuring the origin certificate.
-gamelife.shop {
-	reverse_proxy https://127.0.0.1:28443 {
-		header_up Host gamelife.shop
-		transport http {
-			tls_server_name gamelife.shop
-			# For a privately signed origin, provision its public CA to Caddy:
-			# tls_trust_pool file /etc/caddy/gamelife-origin-ca.pem
+# Merge this logging configuration into the existing global options block.
+# Site paths contain credentials; do not record request URIs or headers.
+{
+	log default {
+		exclude http.log.error.vpn
+	}
+	log vpn_errors {
+		include http.log.error.vpn
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+				request>headers delete
+			}
 		}
 	}
+}
+
+# Set CADDY_NETWORK to the existing Caddy container's Docker network.
+gamelife.shop {
+	log vpn {
+		output discard
+	}
+	reverse_proxy http://gamelife-vpn-origin:80
 }

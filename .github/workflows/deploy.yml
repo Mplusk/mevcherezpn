@@ -87,7 +87,7 @@ jobs:
             exit 1
           fi
           for attempt in 1 2 3; do
-            if ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
+            if ssh-keyscan -T 30 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
               break
             fi
             sleep 3
@@ -101,7 +101,7 @@ jobs:
             echo 'SSH host key does not match the recorded fingerprint'
             exit 1
           fi
-          ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
+          ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=60 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
           if [[ "$OPERATION" == inspect ]]; then
             if ! ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < deploy/inspect.sh > "$keydir/result" 2> "$keydir/error"; then
               grep -E '^VPN_CHECK [a-z0-9_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
