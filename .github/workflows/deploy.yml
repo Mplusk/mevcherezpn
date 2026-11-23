@@ -8,6 +8,10 @@ on:
         options: [inspect, deploy]
         default: inspect
         required: true
+  workflow_run:
+    workflows: [Verify]
+    types: [completed]
+    branches: [main]
 permissions:
   contents: read
   actions: read
@@ -16,20 +20,34 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - name: Require a successful CI run for this commit
-        if: inputs.operation == 'deploy'
+        if: github.event_name == 'workflow_run' || inputs.operation == 'deploy'
         env:
           GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
-          count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&status=success&per_page=1" --jq .total_count)"
+          [[ "$DEPLOY_SHA" =~ ^[a-f0-9]{40}$ ]]
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          if [[ "$main_sha" != "$DEPLOY_SHA" ]]; then
+            echo 'A newer commit is already on main'
+            exit 1
+          fi
+          count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&event=push&status=success&per_page=1" --jq .total_count)"
           if [[ "$count" -lt 1 ]]; then
             echo 'The current commit has not passed Verify'
             exit 1
@@ -39,7 +57,8 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          OPERATION: ${{ inputs.operation }}
+          OPERATION: ${{ github.event_name == 'workflow_run' && 'auto' || inputs.operation }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           : "${DEPLOY_HOST:?set the Actions secret DEPLOY_HOST}" "${DEPLOY_USER:?set DEPLOY_USER}" "${SSH_KEY:?set DEPLOY_SSH_PRIVATE_KEY}"
@@ -83,9 +102,22 @@ jobs:
               exit 1
             fi
             grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
-          elif [[ "$OPERATION" == deploy ]]; then
-            if ! git archive "$GITHUB_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$GITHUB_SHA; cd services/gamelife-vpn/releases/$GITHUB_SHA; tar xf -; bash deploy/release.sh" \
+          elif [[ "$OPERATION" == deploy || "$OPERATION" == auto ]]; then
+            if [[ "$OPERATION" == auto ]]; then
+              set +e
+              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'test -f "$HOME/services/gamelife-vpn/.env"' > "$keydir/result" 2> "$keydir/error"
+              check_status=$?
+              set -e
+              if [[ "$check_status" == 1 ]]; then
+                echo 'Automatic deployment awaits the initial setup'
+                exit 0
+              elif [[ "$check_status" != 0 ]]; then
+                echo 'Could not check the initial setup on the server'
+                exit 1
+              fi
+            fi
+            if ! git archive "$DEPLOY_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$DEPLOY_SHA; cd services/gamelife-vpn/releases/$DEPLOY_SHA; tar xf -; bash deploy/release.sh" \
               > "$keydir/result" 2> "$keydir/error"; then
               echo 'Deployment failed. Inspect the project directly on the server.'
               exit 1
