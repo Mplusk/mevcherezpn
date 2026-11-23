@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
@@ -91,7 +91,7 @@ jobs:
           ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
           if [[ "$OPERATION" == inspect ]]; then
             if ! ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < deploy/inspect.sh > "$keydir/result" 2> "$keydir/error"; then
-              grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
+              grep -E '^VPN_CHECK [a-z0-9_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
               if grep -qi 'Permission denied' "$keydir/error"; then
                 echo 'SSH authentication was rejected for the configured user and key'
               elif grep -Eqi 'timed out|connection refused|connection reset|no route to host' "$keydir/error"; then
@@ -101,7 +101,7 @@ jobs:
               fi
               exit 1
             fi
-            grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
+            grep -E '^VPN_CHECK [a-z0-9_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
           elif [[ "$OPERATION" == deploy || "$OPERATION" == auto ]]; then
             if [[ "$OPERATION" == auto ]]; then
               set +e
