@@ -79,8 +79,8 @@ def main():
         context=ssl._create_unverified_context(),
     )
 
-    def request(method, path, body=None):
-        headers = {"Hiddify-API-Key": admin_key, "Host": hostname}
+    def request(method, path, body=None, key=admin_key):
+        headers = {"Hiddify-API-Key": key, "Host": hostname}
         if body is not None:
             headers["Content-Type"] = "application/json"
         connection.request(method, path, None if body is None else json.dumps(body), headers)
@@ -106,6 +106,28 @@ def main():
     )
     if domain.get("domain") != "vpn.example.invalid":
         raise RuntimeError("Panel returned unexpected domain state")
+    agent_id = str(uuid.uuid4())
+    agent = request(
+        "POST",
+        f"/{admin_path}/api/v2/admin/admin_user/",
+        {
+            "uuid": agent_id,
+            "name": "ci-agent",
+            "mode": "agent",
+            "can_add_admin": False,
+            "lang": "ru",
+            "capabilities": {
+                "add_sub_admins": False,
+                "override_preferred_outbound": False,
+                "add_extra_sublinks": False,
+                "modify_user_extra": False,
+                "modify_domains": False,
+                "modify_outbounds": False,
+            },
+        },
+    )
+    if agent.get("uuid") != agent_id or agent.get("mode") != "agent":
+        raise RuntimeError("Panel returned unexpected API administrator state")
     user_id = str(uuid.uuid4())
     user = request(
         "POST",
@@ -118,6 +140,7 @@ def main():
             "mode": "no_reset",
             "enable": True,
         },
+        key=agent_id,
     )
     if user.get("uuid") != user_id or user.get("enable") is not True:
         raise RuntimeError("Panel returned unexpected user creation state")
@@ -132,12 +155,13 @@ def main():
     if profile.status not in (200, 302):
         raise RuntimeError(f"Panel profile returned HTTP {profile.status}")
     http_origin.close()
-    user = request("PATCH", base + user_id + "/", {"enable": False})
+    user = request("PATCH", base + user_id + "/", {"enable": False}, key=agent_id)
     if user.get("uuid") != user_id or user.get("enable") is not False:
         raise RuntimeError("Panel returned unexpected user update state")
-    request("DELETE", base + user_id + "/")
+    request("DELETE", base + user_id + "/", key=agent_id)
+    request("DELETE", f"/{admin_path}/api/v2/admin/admin_user/{agent_id}/")
     connection.close()
-    print("Disposable Hiddify API created, disabled and deleted a user.")
+    print("A limited Hiddify administrator created, disabled and deleted a user.")
 
 
 if __name__ == "__main__":
