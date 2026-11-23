@@ -86,7 +86,13 @@ jobs:
             fi
             exit 1
           fi
-          if ! ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
+              break
+            fi
+            sleep 3
+          done
+          if [[ ! -s "$keydir/hosts" ]]; then
             echo 'SSH host did not provide an ED25519 key'
             exit 1
           fi
