@@ -106,6 +106,13 @@ def main():
     )
     if domain.get("domain") != "vpn.example.invalid":
         raise RuntimeError("Panel returned unexpected domain state")
+    protocols = request(
+        "PUT", f"/{admin_path}/api/v2/admin/protocols/",
+        {"values": {"vless_enable": True, "ws_enable": True}},
+    )
+    enabled = {item["key"]: item["enabled"] for item in protocols.get("items", [])}
+    if not enabled.get("vless_enable") or not enabled.get("ws_enable"):
+        raise RuntimeError("Panel did not enable the required VPN protocol switches")
     agent_id = str(uuid.uuid4())
     agent = request(
         "POST",
