@@ -37,6 +37,10 @@ jobs:
           umask 077
           printf '%s\n' "$SSH_KEY" > "$keydir/key"
           unset SSH_KEY
+          if ! ssh-keygen -y -P '' -f "$keydir/key" >/dev/null 2>&1; then
+            echo 'SSH key is invalid or requires a passphrase'
+            exit 1
+          fi
           if ! ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null; then
             echo 'SSH host did not provide an ED25519 key'
             exit 1
@@ -46,10 +50,17 @@ jobs:
             echo 'SSH host key does not match the recorded fingerprint'
             exit 1
           fi
-          ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
+          ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
           if [[ "$OPERATION" == inspect ]]; then
             if ! ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' < deploy/inspect.sh > "$keydir/result" 2> "$keydir/error"; then
-              echo 'Server inspection failed. Check SSH access and host requirements.'
+              grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
+              if grep -qi 'Permission denied' "$keydir/error"; then
+                echo 'SSH authentication was rejected for the configured user and key'
+              elif grep -Eqi 'timed out|connection refused|connection reset|no route to host' "$keydir/error"; then
+                echo 'SSH connection failed or timed out'
+              else
+                echo 'Server inspection could not complete'
+              fi
               exit 1
             fi
             grep -E '^VPN_CHECK [a-z_]+=(yes|no|busy|free|unknown)$' "$keydir/result" || true
