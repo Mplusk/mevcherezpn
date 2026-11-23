@@ -46,6 +46,33 @@ def main():
 
     hostname, admin_path, admin_key = admin_url
     base = f"/{admin_path}/api/v2/admin/user/"
+    origin_ip = subprocess.run(
+        [
+            "docker", "inspect", "gamelife-hiddify-panel-1",
+            "--format", '{{with index .NetworkSettings.Networks "vpn-ci-proxy"}}{{.IPAddress}}{{end}}',
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    ).stdout.strip()
+    if not origin_ip:
+        raise RuntimeError("Disposable panel is not connected to the proxy network")
+    http_origin = http.client.HTTPConnection(origin_ip, 80, timeout=30)
+    http_origin.request(
+        "GET",
+        f"/{admin_path}/api/v2/panel/info/",
+        headers={
+            "Host": hostname,
+            "Hiddify-API-Key": admin_key,
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    origin_response = http_origin.getresponse()
+    origin_response.read()
+    if origin_response.status != 200:
+        raise RuntimeError(f"Panel HTTP origin returned HTTP {origin_response.status}")
+    http_origin.close()
     connection = LocalPanelConnection(
         hostname,
         timeout=30,
