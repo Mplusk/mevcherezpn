@@ -90,6 +90,22 @@ def main():
             raise RuntimeError(f"Panel {method} returned HTTP {response.status}")
         return json.loads(data)
 
+    settings = request("GET", f"/{admin_path}/api/v2/admin/settings/")
+    client_paths = [
+        field["value"]
+        for category in settings.get("categories", [])
+        for field in category.get("fields", [])
+        if field.get("key") == "proxy_path_client"
+    ]
+    if len(client_paths) != 1 or not client_paths[0]:
+        raise RuntimeError("Panel did not return a client proxy path")
+    domain = request(
+        "POST",
+        f"/{admin_path}/api/v2/admin/domains/",
+        {"domain": "vpn.example.invalid", "mode": "cdn"},
+    )
+    if domain.get("domain") != "vpn.example.invalid":
+        raise RuntimeError("Panel returned unexpected domain state")
     user_id = str(uuid.uuid4())
     user = request(
         "POST",
@@ -105,6 +121,17 @@ def main():
     )
     if user.get("uuid") != user_id or user.get("enable") is not True:
         raise RuntimeError("Panel returned unexpected user creation state")
+    http_origin = http.client.HTTPConnection(origin_ip, 80, timeout=30)
+    http_origin.request(
+        "GET",
+        f"/{client_paths[0]}/{user_id}/",
+        headers={"Host": hostname, "X-Forwarded-Proto": "https"},
+    )
+    profile = http_origin.getresponse()
+    profile.read()
+    if profile.status not in (200, 302):
+        raise RuntimeError(f"Panel profile returned HTTP {profile.status}")
+    http_origin.close()
     user = request("PATCH", base + user_id + "/", {"enable": False})
     if user.get("uuid") != user_id or user.get("enable") is not False:
         raise RuntimeError("Panel returned unexpected user update state")
