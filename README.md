@@ -1,0 +1,52 @@
+# VPN для gamelife.shop
+
+MVP управления доступом к Hiddify Manager. Оператор через закрытый HTTP API задаёт срок действия и общий лимит трафика, получает страницу подключения клиента и может отозвать доступ. PostgreSQL хранит условия подписки и очередь изменений. Изменения отправляются в Hiddify API v2. Расчёты с клиентами на этом этапе ведёт оператор.
+
+## Размещение на общем VPS
+
+Проект использует два независимых стека Compose. `gamelife-hiddify` содержит панель, её MariaDB и Redis. `gamelife-vpn` содержит Go API и PostgreSQL. Каждый стек получает собственные тома. На хосте по умолчанию доступны `127.0.0.1:18443` для панели и `127.0.0.1:18090` для API. Публичный TLS и маршрутизация домена остаются у существующего Caddy. Панель работает в собственной сетевой среде с NET_ADMIN. Публичные профили в этой схеме должны использовать транспорт, который проходит через HTTP reverse proxy, например VLESS через WebSocket и TLS.
+
+### Первый запуск
+
+1. На VPS понадобятся Linux, Docker Engine с Compose v2.20 или новее, Bash, OpenSSL и flock. Проверьте свободное место, оперативную память и занятость двух локальных портов командой `ss -lnt`. Номера портов настраиваются переменными из [.env.example](.env.example).
+2. Для автоматической доставки добавьте в GitHub **Settings → Secrets and variables → Actions** секреты `DEPLOY_HOST`, `DEPLOY_USER` и `DEPLOY_SSH_PRIVATE_KEY`. Workflow использует SSH на порту 22 и сверяет ED25519-отпечаток с ранее сохранённым для VPS домена. При замене сервера сверьте новый отпечаток с консолью хостинга и обновите ожидаемое значение. Пользователю деплоя нужен доступ к Docker и запись в собственный домашний каталог.
+3. После зелёного **Verify** запустите **Actions → Deploy → Run workflow** на `main`. Первая доставка создаёт `~/services/gamelife-vpn/.env` с правами 0600 и случайными паролями, запускает панель и ждёт её TLS-вход. Версии кода лежат в `releases/<commit>`, текущая в `current`.
+4. На сервере из каталога `current` выполните `docker compose --env-file ../../.env -f compose.panel.yaml exec panel hiddify admin` **из физического каталога релиза** (`cd -P ~/services/gamelife-vpn/current`). Административная ссылка содержит секрет. Для первого входа откройте SSH-туннель `ssh -L 18443:127.0.0.1:18443 USER@HOST` и подключитесь к локальному порту с путём из ссылки. Для проверки подлинности начального сертификата возьмите его отпечаток через уже доверенное SSH-соединение.
+5. В панели добавьте `gamelife.shop`, выберите конфигурации WebSocket/TLS для работы через прокси и настройте сертификат origin с SAN `gamelife.shop`. Он может быть выпущен через DNS-01 или собственной CA, публичному сертификату которой доверяет Caddy. В клиентских профилях указывается публичный порт 443. Примените настройки панели.
+6. В существующей конфигурации Caddy замените блок **только для gamelife.shop** по образцу [deploy/Caddyfile.example](deploy/Caddyfile.example). Если Caddy работает в контейнере с обычной bridge-сетью, подключите его к `gamelife-hiddify_ingress` и используйте upstream `https://panel:443`. Закрепите это подключение в его Compose. Если Caddy работает в сетевой среде хоста, подходит loopback-адрес из примера. При своей CA задайте `tls_trust_pool`. Сохраните старый блок, проверьте полную конфигурацию командой `caddy validate`, затем выполните штатный reload из управляющего Caddy проекта.
+7. Создайте в Hiddify отдельного администратора с правом управления своими пользователями. В серверном `~/services/gamelife-vpn/.env` заполните `HIDDIFY_API_KEY` его UUID, `HIDDIFY_ADMIN_BASE=https://gamelife.shop/<admin-path>` и `HIDDIFY_CLIENT_BASE=https://gamelife.shop/<client-path>`. Базовые адреса содержат пути из настроек панели, без UUID и суффикса API. Повторный **Deploy** поднимет PostgreSQL и Go API. `curl -fsS http://127.0.0.1:18090/healthz` возвращает HTTP 204, когда API видит свою БД.
+
+Оба стека также можно поднять напрямую из checkout с заполненным `.env`:
+
+```sh
+docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
+docker compose up -d --build --wait
+```
+
+### Управление доступом
+
+Выполняйте запросы на сервере или по SSH-туннелю. Загрузите `VPN_ADMIN_TOKEN` из серверного `.env` в окружение текущего оператора. Идентификатор клиента — внутренний ID заказа или клиента, до 64 букв ASCII, цифр, дефисов или подчёркиваний.
+
+```sh
+api=http://127.0.0.1:18090/v1/subscriptions
+until_date=$(date -u -d '+30 days' +%F)
+curl --fail-with-body -X PUT "$api/customer-001" \
+  -H "Authorization: Bearer $VPN_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  --data "{\"valid_through\":\"$until_date\",\"quota_gb\":50}"
+curl --fail-with-body "$api/customer-001" -H "Authorization: Bearer $VPN_ADMIN_TOKEN"
+curl --fail-with-body -X DELETE "$api/customer-001" -H "Authorization: Bearer $VPN_ADMIN_TOKEN"
+```
+
+`valid_through` включает указанную дату по UTC. `quota_gb` — суммарный лимит профиля с момента его создания. Для продления укажите новую конечную дату и новый общий лимит. Счётчик потреблённого трафика сохраняется. Повтор одного PUT сохраняет тот же профиль и условия. DELETE отключает профиль, а повторный PUT позволяет его включить.
+
+HTTP 202 и `sync=pending` означают, что изменение записано в PostgreSQL. После `sync=applied` GET возвращает у включённой подписки персональный `profile_url`. Его можно передать клиенту для импорта через страницу Hiddify. При отзыве доступа дождитесь `sync=applied` и `enabled=false`. Во время сбоя панели уже выданный профиль может работать до применения отзыва или до собственного лимита Hiddify. При восстановлении worker автоматически повторяет запросы с тем же UUID.
+
+Перед первой продажей проверьте временную подписку с внешнего устройства: выдачу страницы, импорт в клиент, прохождение трафика, затем отзыв и отказ нового подключения. Проверка TLS контейнера подтверждает только готовность входа панели.
+
+### Проверка и восстановление
+
+Команда `go test ./...` запускает интеграционный сценарий при заданном `TEST_DATABASE_URL`. Он использует временную таблицу PostgreSQL и TLS-имитатор Hiddify. Проверяются авторизация, создание, повтор после потерянного ответа, продление, отзыв и окончание срока. CI дополнительно поднимает контейнеры на Linux.
+
+Для резервной копии сохраните дамп PostgreSQL, резервную копию штатными средствами Hiddify и защищённую копию серверного `.env`. Для отката маршрута восстановите сохранённый блок домена в Caddy и проверьте конфигурацию перед reload. Для отката версии приложения из предыдущего каталога `releases/<commit>` выполните `bash deploy/release.sh`. Тома сохраняются при обычном обновлении.
+
+Документация: [API Hiddify](https://hiddify.com/manager/contribution/How-to-use-API-in-HiddifyManager-project/), [настройки панели](https://hiddify.com/manager/configuration-and-advanced-settings/How-to-configure-Hiddify-panel-properly/), [Caddy reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).

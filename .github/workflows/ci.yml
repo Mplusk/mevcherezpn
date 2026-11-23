@@ -1,0 +1,47 @@
+name: Verify
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci-password
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 3s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+      - run: go vet ./... && go test -race -v ./...
+        env:
+          TEST_DATABASE_URL: postgres://postgres:ci-password@127.0.0.1:5432/postgres?sslmode=disable
+      - name: Build and start backend
+        env:
+          POSTGRES_PASSWORD: ci-password
+          VPN_ADMIN_TOKEN: ci-token-for-integration-testing-only
+          HIDDIFY_API_KEY: ci-key
+          HIDDIFY_ADMIN_BASE: https://vpn.example/admin-path
+          HIDDIFY_CLIENT_BASE: https://vpn.example/client-path
+        run: |
+          docker compose up -d --build --wait --wait-timeout 90
+          curl --fail --silent http://127.0.0.1:18090/healthz
+  panel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Boot isolated Hiddify and check TLS
+        run: |
+          export PANEL_DB_PASSWORD="$(openssl rand -hex 24)"
+          export PANEL_REDIS_PASSWORD="$(openssl rand -hex 24)"
+          docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
+          openssl s_client -connect 127.0.0.1:18443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout

@@ -1,0 +1,36 @@
+name: Deploy
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: gamelife-vpn-deploy
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Deploy to the project directory on the VPS
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?set the Actions secret DEPLOY_HOST}" "${DEPLOY_USER:?set DEPLOY_USER}" "${SSH_KEY:?set DEPLOY_SSH_PRIVATE_KEY}"
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$DEPLOY_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]
+          keydir="$(mktemp -d)"
+          trap 'rm -f "$keydir/key" "$keydir/hosts"; rmdir "$keydir"' EXIT
+          umask 077
+          printf '%s\n' "$SSH_KEY" > "$keydir/key"
+          unset SSH_KEY
+          ssh-keyscan -T 10 -t ed25519 "$DEPLOY_HOST" > "$keydir/hosts" 2>/dev/null
+          expected='SHA256:vraoI1+Yx3a6Yaw6I3yRi3uzJJg7KOZfq7O3GoEGVzc'
+          [[ "$(ssh-keygen -lf "$keydir/hosts" | awk '{print $2}' | sort -u)" == "$expected" ]]
+          ssh_args=(-i "$keydir/key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$keydir/hosts")
+          git archive "$GITHUB_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$GITHUB_SHA; cd services/gamelife-vpn/releases/$GITHUB_SHA; tar xf -; bash deploy/release.sh"

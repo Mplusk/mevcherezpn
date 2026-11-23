@@ -1,0 +1,51 @@
+name: gamelife-vpn
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGDATABASE: vpn
+      PGUSER: vpn
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      PGSSLMODE: disable
+      PGTZ: UTC
+      VPN_ADMIN_TOKEN: ${VPN_ADMIN_TOKEN:?set VPN_ADMIN_TOKEN}
+      HIDDIFY_ADMIN_BASE: ${HIDDIFY_ADMIN_BASE:?set HIDDIFY_ADMIN_BASE}
+      HIDDIFY_API_KEY: ${HIDDIFY_API_KEY:?set HIDDIFY_API_KEY}
+      HIDDIFY_CLIENT_BASE: ${HIDDIFY_CLIENT_BASE:?set HIDDIFY_CLIENT_BASE}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${VPN_API_PORT:-18090}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 4s
+      retries: 4
+    networks: [egress, database]
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vpn
+      POSTGRES_USER: vpn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "vpn", "-d", "vpn"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  postgres:
+networks:
+  egress:
+  database:
+    internal: true

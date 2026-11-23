@@ -1,0 +1,68 @@
+name: gamelife-hiddify
+services:
+  panel:
+    image: ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9
+    restart: unless-stopped
+    cap_add: [NET_ADMIN]
+    environment:
+      TZ: Etc/UTC
+      MYSQL_DATABASE: hiddifypanel
+      MYSQL_USER: hiddifypanel
+      MYSQL_PASSWORD: ${PANEL_DB_PASSWORD:?generate a hex password}
+      SQLALCHEMY_DATABASE_URI: mysql+mysqldb://hiddifypanel:${PANEL_DB_PASSWORD}@mariadb:3306/hiddifypanel?charset=utf8mb4
+      REDIS_PASSWORD: ${PANEL_REDIS_PASSWORD:?generate a hex password}
+      REDIS_URI_MAIN: redis://:${PANEL_REDIS_PASSWORD}@redis:6379/1
+    volumes:
+      - panel:/opt/hiddify-manager/data
+    ports:
+      - "127.0.0.1:${PANEL_HTTPS_PORT:-18443}:443"
+    networks: [ingress, storage]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "openssl s_client -connect 127.0.0.1:443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout"]
+      start_period: 4m
+      interval: 15s
+      timeout: 6s
+      retries: 16
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+      MARIADB_DATABASE: hiddifypanel
+      MARIADB_USER: hiddifypanel
+      MARIADB_PASSWORD: ${PANEL_DB_PASSWORD}
+    networks: [storage]
+    volumes:
+      - mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${PANEL_REDIS_PASSWORD}
+    command: ["sh", "-ec", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    networks: [storage]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+networks:
+  ingress:
+  storage:
+    internal: true
+volumes:
+  panel:
+  mariadb:
+  redis:
