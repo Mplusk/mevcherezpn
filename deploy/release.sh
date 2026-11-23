@@ -17,7 +17,7 @@ if [[ ! -e "$envfile" ]]; then
             exit 1
         fi
     done
-    if ss -H -lnt | awk '$4 ~ /:(18443|18090)$/ {found=1} END {exit !found}'; then
+    if ss -H -lnt | awk '$4 ~ /:(28443|18090)$/ {found=1} END {exit !found}'; then
         echo 'A required local port is already in use'
         exit 1
     fi

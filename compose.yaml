@@ -3,6 +3,8 @@ services:
   api:
     build: .
     restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.5
     environment:
       PGHOST: db
       PGDATABASE: vpn
@@ -31,6 +33,8 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
     environment:
       POSTGRES_DB: vpn
       POSTGRES_USER: vpn

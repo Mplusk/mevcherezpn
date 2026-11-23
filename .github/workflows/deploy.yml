@@ -52,6 +52,13 @@ jobs:
             echo 'The current commit has not passed Verify'
             exit 1
           fi
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: github.event_name == 'workflow_run' || inputs.operation == 'deploy'
+        with:
+          go-version: '1.27.x'
+      - name: Build Linux backend on the runner
+        if: github.event_name == 'workflow_run' || inputs.operation == 'deploy'
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$RUNNER_TEMP/vpn-api" .
       - name: Deploy to the project directory on the VPS
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -116,7 +123,10 @@ jobs:
                 exit 1
               fi
             fi
-            if ! git archive "$DEPLOY_SHA" | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            release_dir="$(mktemp -d "$RUNNER_TEMP/vpn-release.XXXXXX")"
+            git archive "$DEPLOY_SHA" | tar -xf - -C "$release_dir"
+            cp "$RUNNER_TEMP/vpn-api" "$release_dir/vpn-api"
+            if ! tar -cf - -C "$release_dir" . | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$DEPLOY_SHA; cd services/gamelife-vpn/releases/$DEPLOY_SHA; tar xf -; bash deploy/release.sh" \
               > "$keydir/result" 2> "$keydir/error"; then
               echo 'Deployment failed. Inspect the project directly on the server.'

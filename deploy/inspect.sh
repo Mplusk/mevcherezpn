@@ -29,7 +29,7 @@ if ! command -v ss >/dev/null; then
     exit 0
 fi
 
-for port in 18443 18090; do
+for port in 28443 18090; do
     name=panel_port
     [[ "$port" == 18090 ]] && name=api_port
     if ss -H -lnt | awk -v p=":$port" '$4 ~ (p "$") {found=1} END {exit !found}'; then

@@ -1,6 +1,6 @@
 # Use this site block in the existing Caddy after configuring the origin certificate.
 gamelife.shop {
-	reverse_proxy https://127.0.0.1:18443 {
+	reverse_proxy https://127.0.0.1:28443 {
 		header_up Host gamelife.shop
 		transport http {
 			tls_server_name gamelife.shop

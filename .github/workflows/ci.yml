@@ -45,6 +45,7 @@ jobs:
           HIDDIFY_ADMIN_BASE: https://vpn.example/admin-path
           HIDDIFY_CLIENT_BASE: https://vpn.example/client-path
         run: |
+          CGO_ENABLED=0 GOOS=linux go build -trimpath -o vpn-api .
           docker compose up -d --build --wait --wait-timeout 90
           curl --fail --silent http://127.0.0.1:18090/healthz
   panel:
@@ -59,4 +60,5 @@ jobs:
           export PANEL_DB_PASSWORD="$(openssl rand -hex 24)"
           export PANEL_REDIS_PASSWORD="$(openssl rand -hex 24)"
           docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
-          openssl s_client -connect 127.0.0.1:18443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
+          openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
+          docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)

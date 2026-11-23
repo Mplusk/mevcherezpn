@@ -3,3 +3,4 @@
 !go.sum
 !*.go
 !schema.sql
+!vpn-api
