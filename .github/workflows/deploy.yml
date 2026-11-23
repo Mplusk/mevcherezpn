@@ -112,7 +112,7 @@ jobs:
           elif [[ "$OPERATION" == deploy || "$OPERATION" == auto ]]; then
             if [[ "$OPERATION" == auto ]]; then
               set +e
-              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'test -f "$HOME/services/gamelife-vpn/.env"' > "$keydir/result" 2> "$keydir/error"
+              ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" 'test -f "$HOME/services/gamelife-vpn/.env" && test -L "$HOME/services/gamelife-vpn/current"' > "$keydir/result" 2> "$keydir/error"
               check_status=$?
               set -e
               if [[ "$check_status" == 1 ]]; then

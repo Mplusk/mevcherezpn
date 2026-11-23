@@ -31,7 +31,7 @@ if [[ ! -e "$envfile" ]]; then
     } >"$tmp"
     mv "$tmp" "$envfile"
 fi
-compose=(docker compose --env-file "$envfile")
+compose=(docker compose --parallel 1 --env-file "$envfile")
 "${compose[@]}" -f compose.panel.yaml up -d --wait --wait-timeout 600
 if grep -Eq '^HIDDIFY_API_KEY=.+' "$envfile"; then
     "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 120
