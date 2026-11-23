@@ -162,6 +162,32 @@ def main():
     if profile.status not in (200, 302):
         raise RuntimeError(f"Panel profile returned HTTP {profile.status}")
     http_origin.close()
+    http_origin = http.client.HTTPConnection(origin_ip, 80, timeout=30)
+    http_origin.request(
+        "GET",
+        f"/{client_paths[0]}/{user_id}/xray/",
+        headers={"Host": "vpn.example.invalid", "X-Forwarded-Proto": "https"},
+    )
+    config_response = http_origin.getresponse()
+    config_data = config_response.read()
+    if config_response.status != 200:
+        raise RuntimeError(f"Panel Xray profile returned HTTP {config_response.status}")
+    configs = json.loads(config_data)
+    if isinstance(configs, dict):
+        configs = [configs]
+    matching = []
+    for config in configs:
+        for outbound in config.get("outbounds", []):
+            stream = outbound.get("streamSettings", {})
+            servers = outbound.get("settings", {}).get("vnext", [])
+            if (outbound.get("protocol") == "vless" and stream.get("network") == "ws"
+                    and stream.get("security") == "tls" and servers
+                    and (servers[0].get("address") == "vpn.example.invalid"
+                         or stream.get("tlsSettings", {}).get("serverName") == "vpn.example.invalid")):
+                matching.append(outbound)
+    if not matching:
+        raise RuntimeError("Panel did not generate a VLESS WebSocket/TLS profile for the domain")
+    http_origin.close()
     user = request("PATCH", base + user_id + "/", {"enable": False}, key=agent_id)
     if user.get("uuid") != user_id or user.get("enable") is not False:
         raise RuntimeError("Panel returned unexpected user update state")
