@@ -33,9 +33,8 @@ if [[ ! -e "$envfile" ]]; then
 fi
 compose=(docker compose --parallel 1 --env-file "$envfile")
 panel_files=(-f compose.panel.yaml)
-if grep -Eq '^CADDY_NETWORK=[A-Za-z0-9_.-]+$' "$envfile"; then
-    panel_files+=(-f compose.gateway.yaml)
-elif grep -q '^CADDY_NETWORK=.' "$envfile"; then
+gateway_network="$(awk -F= '$1 == "CADDY_NETWORK" {print $2}' "$envfile" | tail -n 1)"
+if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     echo 'Invalid Caddy network name'
     exit 1
 fi
@@ -51,6 +50,25 @@ configured_port() {
 }
 
 "${compose[@]}" "${panel_files[@]}" up -d
+if [[ -n "$gateway_network" ]]; then
+    panel_id="$("${compose[@]}" "${panel_files[@]}" ps -q panel)"
+    if [[ ! "$panel_id" =~ ^[a-f0-9]{12,64}$ ]]; then
+        echo 'Panel container is unavailable'
+        exit 1
+    fi
+    attached="$(docker inspect --format "{{if index .NetworkSettings.Networks \"$gateway_network\"}}yes{{else}}no{{end}}" "$panel_id")"
+    if [[ "$attached" == no ]]; then
+        docker network connect --alias gamelife-vpn-origin "$gateway_network" "$panel_id"
+    elif [[ "$attached" == yes ]]; then
+        if ! docker inspect --format "{{range (index .NetworkSettings.Networks \"$gateway_network\").Aliases}}{{println .}}{{end}}" "$panel_id" | grep -Fxq gamelife-vpn-origin; then
+            echo 'Panel is connected to the Caddy network without the required alias'
+            exit 1
+        fi
+    else
+        echo 'Could not check the panel network'
+        exit 1
+    fi
+fi
 panel_port="$(configured_port PANEL_HTTPS_PORT 28443)"
 deadline=$((SECONDS + 7200))
 until timeout 60 bash -c 'openssl s_client -connect "127.0.0.1:$1" -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout >/dev/null 2>&1' _ "$panel_port"; do

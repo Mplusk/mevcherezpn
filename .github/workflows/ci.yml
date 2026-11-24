@@ -61,9 +61,8 @@ jobs:
           export PANEL_REDIS_PASSWORD="$(openssl rand -hex 24)"
           export CADDY_NETWORK=vpn-ci-proxy
           docker network create "$CADDY_NETWORK"
-          docker compose -f compose.panel.yaml -f compose.gateway.yaml up -d --wait --wait-timeout 600
+          docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
-          docker run --rm --network "$CADDY_NETWORK" redis:7.4-alpine nc -z -w 5 gamelife-vpn-origin 80
           python3 deploy/smoke_panel.py
           bash -n deploy/release.sh
           test_home="$(realpath "$RUNNER_TEMP")/vpn-release-test"
@@ -76,6 +75,10 @@ jobs:
             printf 'PANEL_REDIS_PASSWORD=%s\n' "$PANEL_REDIS_PASSWORD"
             printf 'CADDY_NETWORK=%s\nHIDDIFY_API_KEY=\n' "$CADDY_NETWORK"
           } > "$test_root/.env"
+          panel_before="$(docker compose -f compose.panel.yaml ps -q panel)"
           (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
           test -L "$test_root/current"
+          docker run --rm --network "$CADDY_NETWORK" redis:7.4-alpine nc -z -w 5 gamelife-vpn-origin 80
+          (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
+          test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)
