@@ -13,6 +13,12 @@ services:
         source /opt/hiddify-manager/.venv313/bin/activate
         python -c 'import importlib.util as i; assert i.find_spec("hiddifypanel")'
         sed '/^uv pip install -e services\/panel\/src *$$/d' /opt/hiddify-manager/scripts/docker-init.sh > /tmp/gamelife-hiddify-init.sh
+        if [ "$$(grep -c '^chown -R hiddify-panel:hiddify-panel ' /opt/hiddify-manager/services/panel/run.sh)" -ne 1 ]; then
+          echo 'Unexpected Hiddify panel setup; refusing to start'
+          exit 1
+        fi
+        sed 's/^chown -R hiddify-panel:hiddify-panel /chown hiddify-panel:hiddify-panel /' /opt/hiddify-manager/services/panel/run.sh > /tmp/gamelife-panel-run.sh
+        cat /tmp/gamelife-panel-run.sh > /opt/hiddify-manager/services/panel/run.sh
         exec /bin/bash /tmp/gamelife-hiddify-init.sh
     restart: unless-stopped
     mem_limit: 512m
