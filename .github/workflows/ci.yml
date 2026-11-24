@@ -63,7 +63,6 @@ jobs:
           docker network create "$CADDY_NETWORK"
           docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
-          python3 deploy/smoke_panel.py
           bash -n deploy/release.sh
           test_home="$(realpath "$RUNNER_TEMP")/vpn-release-test"
           test_root="$test_home/services/gamelife-vpn"
@@ -79,6 +78,7 @@ jobs:
           (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
           test -L "$test_root/current"
           docker run --rm --network "$CADDY_NETWORK" redis:7.4-alpine nc -z -w 5 gamelife-vpn-origin 80
+          python3 deploy/smoke_panel.py
           (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
           test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)
