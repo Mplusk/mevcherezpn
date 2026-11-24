@@ -39,7 +39,7 @@ elif grep -q '^CADDY_NETWORK=.' "$envfile"; then
     echo 'Invalid Caddy network name'
     exit 1
 fi
-"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 1800
+"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 3600
 if grep -Eq '^HIDDIFY_API_KEY=.+' "$envfile"; then
     "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 300
     echo 'Backend and PostgreSQL healthy'
