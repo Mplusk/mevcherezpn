@@ -29,6 +29,7 @@ services:
     environment:
       TZ: Etc/UTC
       UV_OFFLINE: "1"
+      HIDDIFY_NO_HTTP_API: "true"
       MYSQL_DATABASE: hiddifypanel
       MYSQL_USER: hiddifypanel
       MYSQL_PASSWORD: ${PANEL_DB_PASSWORD:?generate a hex password}
