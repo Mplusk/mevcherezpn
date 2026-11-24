@@ -39,9 +39,9 @@ elif grep -q '^CADDY_NETWORK=.' "$envfile"; then
     echo 'Invalid Caddy network name'
     exit 1
 fi
-"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 600
+"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 1800
 if grep -Eq '^HIDDIFY_API_KEY=.+' "$envfile"; then
-    "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 120
+    "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 300
     echo 'Backend and PostgreSQL healthy'
 else
     echo 'Panel bootstrap complete. Configure the Hiddify domain, API key and paths in the server .env to start the backend.'

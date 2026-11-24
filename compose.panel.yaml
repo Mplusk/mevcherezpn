@@ -28,10 +28,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "openssl s_client -connect 127.0.0.1:443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout"]
-      start_period: 4m
+      start_period: 10m
       interval: 15s
-      timeout: 6s
-      retries: 16
+      timeout: 15s
+      retries: 24
   mariadb:
     image: mariadb:11.4
     restart: unless-stopped
@@ -48,9 +48,10 @@ services:
       - mariadb:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 5s
-      timeout: 4s
-      retries: 20
+      start_period: 10m
+      interval: 10s
+      timeout: 15s
+      retries: 30
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -64,9 +65,10 @@ services:
       - redis:/data
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -qx PONG"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+      start_period: 5m
+      interval: 10s
+      timeout: 15s
+      retries: 30
 networks:
   ingress:
   storage:
