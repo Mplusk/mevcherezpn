@@ -19,7 +19,30 @@ gamelife.shop {
 	log vpn {
 		output discard
 	}
-	reverse_proxy http://gamelife-vpn-origin:80
+	handle / {
+		header Content-Type "text/html; charset=utf-8"
+		respond <<HTML
+			<!doctype html>
+			<html lang="ru">
+			<head>
+			  <meta charset="utf-8">
+			  <meta name="viewport" content="width=device-width, initial-scale=1">
+			  <meta name="theme-color" content="#0b1720">
+			  <title>GameLife VPN</title>
+			</head>
+			<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1720;color:#eaf5f5;font:16px/1.6 system-ui,sans-serif">
+			  <main style="box-sizing:border-box;width:min(90%,720px);padding:clamp(30px,6vw,64px);border:1px solid #29464c;border-radius:24px;background:#10232b">
+			    <p style="margin:0 0 18px;color:#7be0c3;font-weight:700;letter-spacing:.15em">GAMELIFE VPN</p>
+			    <h1 style="margin:0 0 16px;font-size:clamp(32px,6vw,52px);line-height:1.1">VPN для ваших устройств</h1>
+			    <p style="margin:0;color:#b8cdcd;font-size:18px">Чтобы подключиться, откройте свою персональную ссылку в приложении VPN.</p>
+			  </main>
+			</body>
+			</html>
+			HTML 200
+	}
+	handle {
+		reverse_proxy http://gamelife-vpn-origin:80
+	}
 }
 
 www.gamelife.shop {

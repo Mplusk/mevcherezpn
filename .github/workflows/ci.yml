@@ -109,4 +109,5 @@ jobs:
             sleep 2
           done
           test "$ready" = yes
+          curl --fail --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 https://gamelife.shop:18443/ | grep -Fq 'GameLife VPN'
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)

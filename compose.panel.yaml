@@ -40,8 +40,6 @@ services:
         fi
         exec /bin/bash /tmp/gamelife-hiddify-init.sh
     restart: unless-stopped
-    mem_limit: ${PANEL_MEM_LIMIT:-1536m}
-    cpus: ${PANEL_CPU_LIMIT:-2.0}
     cap_add: [NET_ADMIN]
     environment:
       TZ: Etc/UTC
@@ -75,9 +73,6 @@ services:
   mariadb:
     image: mariadb:11.4
     restart: unless-stopped
-    mem_limit: 160m
-    cpus: 0.5
-    command: ["--innodb-buffer-pool-size=64M", "--max-connections=40"]
     environment:
       MARIADB_RANDOM_ROOT_PASSWORD: "1"
       MARIADB_DATABASE: hiddifypanel
@@ -95,11 +90,9 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    mem_limit: 64m
-    cpus: 0.25
     environment:
       REDIS_PASSWORD: ${PANEL_REDIS_PASSWORD}
-    command: ["sh", "-ec", "exec redis-server --maxmemory 32mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-ec", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     networks: [storage]
     volumes:
       - redis:/data
