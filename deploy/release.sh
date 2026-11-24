@@ -39,9 +39,38 @@ elif grep -q '^CADDY_NETWORK=.' "$envfile"; then
     echo 'Invalid Caddy network name'
     exit 1
 fi
-"${compose[@]}" "${panel_files[@]}" up -d --wait --wait-timeout 3600
+configured_port() {
+    local name="$1" fallback="$2" value
+    value="$(awk -F= -v key="$name" '$1 == key {print $2}' "$envfile" | tail -n 1)"
+    value="${!name:-${value:-$fallback}}"
+    if [[ ! "$value" =~ ^[0-9]{1,5}$ ]] || ((10#$value < 1 || 10#$value > 65535)); then
+        echo "Invalid port in $name"
+        return 1
+    fi
+    printf '%s' "$value"
+}
+
+"${compose[@]}" "${panel_files[@]}" up -d
+panel_port="$(configured_port PANEL_HTTPS_PORT 28443)"
+deadline=$((SECONDS + 3600))
+until timeout 60 bash -c 'openssl s_client -connect "127.0.0.1:$1" -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout >/dev/null 2>&1' _ "$panel_port"; do
+    if ((SECONDS >= deadline)); then
+        echo 'Panel TLS did not become ready within the expected time'
+        exit 1
+    fi
+    sleep 15
+done
 if grep -Eq '^HIDDIFY_API_KEY=.+' "$envfile"; then
-    "${compose[@]}" -f compose.yaml up -d --build --wait --wait-timeout 300
+    "${compose[@]}" -f compose.yaml up -d --build
+    api_port="$(configured_port VPN_API_PORT 18090)"
+    deadline=$((SECONDS + 1800))
+    until timeout 60 curl --fail --silent --output /dev/null "http://127.0.0.1:$api_port/healthz"; do
+        if ((SECONDS >= deadline)); then
+            echo 'Backend did not become ready within the expected time'
+            exit 1
+        fi
+        sleep 15
+    done
     echo 'Backend and PostgreSQL healthy'
 else
     echo 'Panel bootstrap complete. Configure the Hiddify domain, API key and paths in the server .env to start the backend.'
