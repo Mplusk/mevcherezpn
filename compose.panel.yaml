@@ -8,6 +8,7 @@ services:
     cap_add: [NET_ADMIN]
     environment:
       TZ: Etc/UTC
+      UV_OFFLINE: "1"
       MYSQL_DATABASE: hiddifypanel
       MYSQL_USER: hiddifypanel
       MYSQL_PASSWORD: ${PANEL_DB_PASSWORD:?generate a hex password}
@@ -28,10 +29,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "openssl s_client -connect 127.0.0.1:443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout"]
-      start_period: 10m
-      interval: 15s
-      timeout: 15s
-      retries: 24
+      start_period: 15m
+      interval: 30s
+      timeout: 60s
+      retries: 20
   mariadb:
     image: mariadb:11.4
     restart: unless-stopped
@@ -48,10 +49,10 @@ services:
       - mariadb:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      start_period: 10m
-      interval: 10s
-      timeout: 15s
-      retries: 30
+      start_period: 15m
+      interval: 30s
+      timeout: 60s
+      retries: 20
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -65,10 +66,10 @@ services:
       - redis:/data
     healthcheck:
       test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -qx PONG"]
-      start_period: 5m
-      interval: 10s
-      timeout: 15s
-      retries: 30
+      start_period: 10m
+      interval: 30s
+      timeout: 60s
+      retries: 20
 networks:
   ingress:
   storage:

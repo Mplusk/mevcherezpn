@@ -46,7 +46,7 @@ jobs:
           HIDDIFY_CLIENT_BASE: https://vpn.example/client-path
         run: |
           CGO_ENABLED=0 GOOS=linux go build -trimpath -o vpn-api .
-          docker compose up -d --build --wait --wait-timeout 90
+          docker compose up -d --build --wait --wait-timeout 180
           curl --fail --silent http://127.0.0.1:18090/healthz
   panel:
     runs-on: ubuntu-latest

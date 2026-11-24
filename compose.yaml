@@ -26,9 +26,9 @@ services:
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
-      start_period: 3m
-      interval: 15s
-      timeout: 15s
+      start_period: 10m
+      interval: 30s
+      timeout: 60s
       retries: 20
     networks: [egress, database]
   db:
@@ -45,10 +45,10 @@ services:
     networks: [database]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "vpn", "-d", "vpn"]
-      start_period: 5m
-      interval: 10s
-      timeout: 15s
-      retries: 30
+      start_period: 10m
+      interval: 30s
+      timeout: 60s
+      retries: 20
 volumes:
   postgres:
 networks:
