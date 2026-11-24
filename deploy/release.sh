@@ -38,6 +38,20 @@ if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; the
     echo 'Invalid Caddy network name'
     exit 1
 fi
+standalone_gateway="$(awk -F= '$1 == "VPN_STANDALONE_GATEWAY" {print $2}' "$envfile" | tail -n 1)"
+if [[ -n "$standalone_gateway" && "$standalone_gateway" != 1 ]]; then
+    echo 'Invalid standalone gateway setting'
+    exit 1
+fi
+if [[ "$standalone_gateway" == 1 ]]; then
+    if [[ -z "$gateway_network" || ! -f "$root/gateway/Caddyfile" ]]; then
+        echo 'Standalone gateway network or configuration is missing'
+        exit 1
+    fi
+    docker network inspect "$gateway_network" >/dev/null
+    export VPN_GATEWAY_CONFIG="$root/gateway/Caddyfile"
+    "${compose[@]}" -f compose.standalone.yaml up -d
+fi
 configured_port() {
     local name="$1" fallback="$2" value
     value="$(awk -F= -v key="$name" '$1 == key {print $2}' "$envfile" | tail -n 1)"

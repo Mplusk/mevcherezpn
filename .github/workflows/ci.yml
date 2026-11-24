@@ -63,6 +63,20 @@ jobs:
           docker network create "$CADDY_NETWORK"
           docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
+          docker exec gamelife-hiddify-panel-1 grep -Fxq '        add_task "Warp" install_run services/warp false' /opt/hiddify-manager/scripts/install.sh
+          docker restart gamelife-hiddify-panel-1 >/dev/null
+          panel_restart_count="$(docker inspect gamelife-hiddify-panel-1 --format '{{.RestartCount}}')"
+          panel_ready=no
+          for attempt in $(seq 1 120); do
+            if timeout 3 bash -c 'openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout >/dev/null 2>&1'; then
+              panel_ready=yes
+              break
+            fi
+            sleep 2
+          done
+          test "$panel_ready" = yes
+          sleep 15
+          test "$panel_restart_count" = "$(docker inspect gamelife-hiddify-panel-1 --format '{{.RestartCount}}')"
           bash -n deploy/release.sh
           test_home="$(realpath "$RUNNER_TEMP")/vpn-release-test"
           test_root="$test_home/services/gamelife-vpn"
@@ -81,4 +95,18 @@ jobs:
           python3 deploy/smoke_panel.py
           (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
           test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
+          gateway_image='caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0'
+          docker run --rm -v "$GITHUB_WORKSPACE/deploy/Caddyfile.standalone:/etc/caddy/Caddyfile:ro" "$gateway_image" caddy validate --config /etc/caddy/Caddyfile
+          mkdir -p "$test_root/gateway"
+          awk '{print; if ($0 == "gamelife.shop {" || $0 == "www.gamelife.shop {") print "\ttls internal"}' deploy/Caddyfile.standalone > "$test_root/gateway/Caddyfile"
+          printf 'VPN_STANDALONE_GATEWAY=1\nVPN_GATEWAY_HTTP_PORT=18081\nVPN_GATEWAY_HTTPS_PORT=18443\n' >> "$test_root/.env"
+          (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
+          test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
+          ready=no
+          for attempt in $(seq 1 30); do
+            status="$(curl --silent --insecure --noproxy '*' --connect-timeout 2 --max-time 5 --resolve gamelife.shop:18443:127.0.0.1 -o /dev/null -w '%{http_code}' https://gamelife.shop:18443/ || true)"
+            if [[ "$status" =~ ^[234][0-9][0-9]$ ]]; then ready=yes; break; fi
+            sleep 2
+          done
+          test "$ready" = yes
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)

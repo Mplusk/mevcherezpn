@@ -1,0 +1,32 @@
+name: gamelife-gateway
+services:
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 1.0
+    ports:
+      - "${VPN_GATEWAY_HTTP_PORT:-80}:80"
+      - "${VPN_GATEWAY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${VPN_GATEWAY_CONFIG:?set the protected Caddyfile path}:/etc/caddy/Caddyfile:ro
+      - data:/data
+      - config:/config
+    networks: [gateway]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+networks:
+  gateway:
+    external: true
+    name: ${CADDY_NETWORK:?set the dedicated gateway network}
+volumes:
+  data:
+  config:

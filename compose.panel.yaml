@@ -21,6 +21,20 @@ services:
         fi
         sed 's/^chown -R hiddify-panel:hiddify-panel /chown hiddify-panel:hiddify-panel /' /opt/hiddify-manager/services/panel/run.sh > /tmp/gamelife-panel-run.sh
         cat /tmp/gamelife-panel-run.sh > /opt/hiddify-manager/services/panel/run.sh
+        if [ "$${VPN_DISABLE_WARP:-true}" = true ]; then
+          enabled="$$(grep -Fxc '        add_task "Warp" install_run services/warp 1' /opt/hiddify-manager/scripts/install.sh || true)"
+          disabled="$$(grep -Fxc '        add_task "Warp" install_run services/warp false' /opt/hiddify-manager/scripts/install.sh || true)"
+          if [ "$$enabled" = 1 ] && [ "$$disabled" = 0 ]; then
+            sed 's|^        add_task "Warp" install_run services/warp 1$$|        add_task "Warp" install_run services/warp false|' /opt/hiddify-manager/scripts/install.sh > /tmp/gamelife-install.sh
+            cat /tmp/gamelife-install.sh > /opt/hiddify-manager/scripts/install.sh
+          elif [ "$$enabled" != 0 ] || [ "$$disabled" != 1 ]; then
+            echo 'Unexpected Hiddify WARP setup; refusing to start'
+            exit 1
+          fi
+        elif [ "$${VPN_DISABLE_WARP}" != false ]; then
+          echo 'Invalid VPN_DISABLE_WARP setting'
+          exit 1
+        fi
         exec /bin/bash /tmp/gamelife-hiddify-init.sh
     restart: unless-stopped
     mem_limit: 512m
@@ -30,6 +44,7 @@ services:
       TZ: Etc/UTC
       UV_OFFLINE: "1"
       HIDDIFY_NO_HTTP_API: "true"
+      VPN_DISABLE_WARP: ${VPN_DISABLE_WARP:-true}
       MYSQL_DATABASE: hiddifypanel
       MYSQL_USER: hiddifypanel
       MYSQL_PASSWORD: ${PANEL_DB_PASSWORD:?generate a hex password}
