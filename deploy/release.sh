@@ -52,7 +52,7 @@ configured_port() {
 
 "${compose[@]}" "${panel_files[@]}" up -d
 panel_port="$(configured_port PANEL_HTTPS_PORT 28443)"
-deadline=$((SECONDS + 3600))
+deadline=$((SECONDS + 7200))
 until timeout 60 bash -c 'openssl s_client -connect "127.0.0.1:$1" -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout >/dev/null 2>&1' _ "$panel_port"; do
     if ((SECONDS >= deadline)); then
         echo 'Panel TLS did not become ready within the expected time'

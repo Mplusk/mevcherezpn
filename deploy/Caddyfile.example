@@ -2,10 +2,10 @@
 # Site paths contain credentials; do not record request URIs or headers.
 {
 	log default {
-		exclude http.log.error.vpn
+		exclude http.log.error.vpn http.log.error.vpn_www
 	}
 	log vpn_errors {
-		include http.log.error.vpn
+		include http.log.error.vpn http.log.error.vpn_www
 		output stderr
 		format filter {
 			wrap json
@@ -23,4 +23,11 @@ gamelife.shop {
 		output discard
 	}
 	reverse_proxy http://gamelife-vpn-origin:80
+}
+
+www.gamelife.shop {
+	log vpn_www {
+		output discard
+	}
+	redir https://gamelife.shop{uri} permanent
 }
