@@ -2,6 +2,18 @@ name: gamelife-hiddify
 services:
   panel:
     image: ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        if ! grep -Fxq 'uv pip install -e services/panel/src ' /opt/hiddify-manager/scripts/docker-init.sh; then
+          echo 'Unexpected Hiddify entrypoint; refusing to start'
+          exit 1
+        fi
+        source /opt/hiddify-manager/.venv313/bin/activate
+        python -c 'import importlib.util as i; assert i.find_spec("hiddifypanel")'
+        sed '/^uv pip install -e services\/panel\/src *$$/d' /opt/hiddify-manager/scripts/docker-init.sh > /tmp/gamelife-hiddify-init.sh
+        exec /bin/bash /tmp/gamelife-hiddify-init.sh
     restart: unless-stopped
     mem_limit: 512m
     cpus: 1.0
