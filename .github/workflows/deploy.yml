@@ -133,7 +133,7 @@ jobs:
             git archive "$DEPLOY_SHA" | tar -xf - -C "$release_dir"
             cp "$RUNNER_TEMP/vpn-api" "$release_dir/vpn-api"
             if ! tar -cf - -C "$release_dir" . | ssh "${ssh_args[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-              "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$DEPLOY_SHA; cd services/gamelife-vpn/releases/$DEPLOY_SHA; tar xf -; bash deploy/release.sh" \
+              "set -eu; umask 077; cd; mkdir -p services/gamelife-vpn/releases/$DEPLOY_SHA; cd services/gamelife-vpn/releases/$DEPLOY_SHA; tar --no-same-owner --no-same-permissions -xf -; bash deploy/release.sh" \
               > "$keydir/result" 2> "$keydir/error"; then
               echo 'Deployment failed. Inspect the project directly on the server.'
               exit 1
