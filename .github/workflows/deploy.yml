@@ -96,7 +96,7 @@ jobs:
             echo 'SSH host did not provide an ED25519 key'
             exit 1
           fi
-          expected='SHA256:vraoI1+Yx3a6Yaw6I3yRi3uzJJg7KOZfq7O3GoEGVzc'
+          expected='SHA256:7b35V5t2maq4hsscaYp2dtqjohy2foGqQFHVmk7ThXc'
           if [[ "$(ssh-keygen -lf "$keydir/hosts" | awk '{print $2}' | sort -u)" != "$expected" ]]; then
             echo 'SSH host key does not match the recorded fingerprint'
             exit 1
