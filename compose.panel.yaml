@@ -15,8 +15,8 @@ services:
         source /opt/hiddify-manager/.venv313/bin/activate
         python -c 'import importlib.util as i; assert i.find_spec("hiddifypanel")'
         sed '/^uv pip install -e services\/panel\/src *$$/d' /opt/hiddify-manager/scripts/docker-init.sh > /tmp/gamelife-hiddify-init.sh
-        recursive_chown="$$(grep -c '^chown -R hiddify-panel:hiddify-panel ' /opt/hiddify-manager/services/panel/run.sh || true)"
-        single_chown="$$(grep -c '^chown hiddify-panel:hiddify-panel ' /opt/hiddify-manager/services/panel/run.sh || true)"
+        recursive_chown="$$(grep -Fxc 'chown -R hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
+        single_chown="$$(grep -Fxc 'chown hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
         if [ "$$recursive_chown" = 1 ] && [ "$$single_chown" = 0 ]; then
           sed 's/^chown -R hiddify-panel:hiddify-panel /chown hiddify-panel:hiddify-panel /' /opt/hiddify-manager/services/panel/run.sh > /tmp/gamelife-panel-run.sh
           cat /tmp/gamelife-panel-run.sh > /opt/hiddify-manager/services/panel/run.sh
