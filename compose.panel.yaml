@@ -40,8 +40,8 @@ services:
         fi
         exec /bin/bash /tmp/gamelife-hiddify-init.sh
     restart: unless-stopped
-    mem_limit: 512m
-    cpus: 1.0
+    mem_limit: ${PANEL_MEM_LIMIT:-1536m}
+    cpus: ${PANEL_CPU_LIMIT:-2.0}
     cap_add: [NET_ADMIN]
     environment:
       TZ: Etc/UTC
