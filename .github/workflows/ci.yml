@@ -110,4 +110,5 @@ jobs:
           done
           test "$ready" = yes
           curl --fail --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 https://gamelife.shop:18443/ | grep -Fq 'GameLife VPN'
+          test "$(curl --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 -H 'X-GameLife-Decoy-Loop: 1' -o /dev/null -w '%{http_code}' https://gamelife.shop:18443/unknown)" = 404
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)

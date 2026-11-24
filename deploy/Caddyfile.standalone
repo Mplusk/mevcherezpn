@@ -19,6 +19,10 @@ gamelife.shop {
 	log vpn {
 		output discard
 	}
+	@decoy_loop header X-GameLife-Decoy-Loop 1
+	handle @decoy_loop {
+		respond "Not Found" 404
+	}
 	handle / {
 		header Content-Type "text/html; charset=utf-8"
 		respond <<HTML
@@ -41,7 +45,9 @@ gamelife.shop {
 			HTML 200
 	}
 	handle {
-		reverse_proxy http://gamelife-vpn-origin:80
+		reverse_proxy http://gamelife-vpn-origin:80 {
+			header_up X-GameLife-Decoy-Loop 1
+		}
 	}
 }
 
