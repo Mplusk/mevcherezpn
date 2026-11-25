@@ -83,6 +83,9 @@ if [[ -n "$gateway_network" ]]; then
         exit 1
     fi
 fi
+if [[ "$standalone_gateway" == 1 ]]; then
+    python3 deploy/life/gateway.py "$root"
+fi
 panel_port="$(configured_port PANEL_HTTPS_PORT 28443)"
 panel_wait=7200
 if [[ ! -L "$root/current" ]]; then

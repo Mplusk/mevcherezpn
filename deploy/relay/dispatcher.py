@@ -16,6 +16,7 @@ REPOSITORY = 'Mplusk/mevcherezpn'
 API = 'https://api.github.com/repos/' + REPOSITORY
 FILES = ('renderer.py', 'release.py', 'dispatcher.py', 'compose.yaml',
          'gamelife-subrelay-refresh.service', 'gamelife-subrelay-refresh.timer')
+LIFE_FILES = ('index.html', 'life.js', 'gateway.py')
 
 
 def parse_command(command):
@@ -100,6 +101,14 @@ def deploy(revision):
                           env=env, output=True)
             path = directory / name
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(content)
+        life_dir = directory / 'life'
+        life_dir.mkdir(mode=0o700)
+        for name in LIFE_FILES:
+            content = run(['git', '-C', temp, 'show', revision + ':deploy/life/' + name],
+                          env=env, output=True)
+            fd = os.open(life_dir / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(content)
         require_main(revision)
