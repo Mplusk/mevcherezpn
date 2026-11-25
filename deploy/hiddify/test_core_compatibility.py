@@ -11,7 +11,7 @@ import threading
 import time
 import unittest
 from urllib.parse import quote
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 
 from auto_profile import AUTO_ALIAS_TAG, AUTO_TAG, automatic_profile
 from test_auto_profile import AGENT, fixture
@@ -195,12 +195,12 @@ class RealCoreCompatibilityTests(unittest.TestCase):
                 generated = json.loads(built.read_text(encoding="utf-8-sig"))
                 by_tag = {out.get("tag"): out for out in generated.get("outbounds", [])}
                 self.assertEqual(set(by_tag["select"]["outbounds"]),
-                                 {"balance", "lowest", AUTO_TAG, AUTO_ALIAS_TAG})
+                                 {"balance", "lowest", AUTO_TAG, AUTO_ALIAS_TAG, "NL", "DE", "PL"})
                 self.assertEqual(by_tag[AUTO_ALIAS_TAG]["outbounds"], [AUTO_TAG])
                 self.assertEqual(by_tag[AUTO_TAG]["strategy"], "lowest-delay")
                 members = by_tag[AUTO_TAG]["outbounds"]
                 self.assertEqual(len(members), 3)
-                self.assertTrue(all("§hide§" in tag and by_tag[tag]["type"] == "vless" for tag in members))
+                self.assertTrue(all("§hide§" not in tag and by_tag[tag]["type"] == "vless" for tag in members))
                 self.assertNotIn("direct", members)
 
                 # The app supplies this default; the standalone builder omits it.
@@ -243,6 +243,22 @@ class RealCoreCompatibilityTests(unittest.TestCase):
                 try:
                     self.assertTrue(wait_for(lambda: all(node.requests for node in nodes)),
                                     "client did not probe every independent node")
+                    for tag, node in zip(members, nodes):
+                        request = Request(f"http://127.0.0.1:{api_port}/proxies/select",
+                                          data=json.dumps({"name": tag}).encode(), method="PUT",
+                                          headers={"Content-Type": "application/json"})
+                        with opener.open(request, timeout=5):
+                            pass
+                        self.assertTrue(wait_for(lambda: group("select") == tag), "manual selection failed")
+                        expected = json.dumps({"node": node.name, "ip": "192.0.2.1"}).encode()
+                        self.assertEqual(wait_for(lambda: via_local_socks(proxy_port, trap.server_address[1])),
+                                         expected, "manual selection used the wrong node")
+                    request = Request(f"http://127.0.0.1:{api_port}/proxies/select",
+                                      data=json.dumps({"name": AUTO_TAG}).encode(), method="PUT",
+                                      headers={"Content-Type": "application/json"})
+                    with opener.open(request, timeout=5):
+                        pass
+                    self.assertTrue(wait_for(lambda: group("select") == AUTO_TAG))
                     selected = wait_for(lambda: group(AUTO_TAG) if group(AUTO_TAG) in members else None)
                     self.assertIn(selected, members)
                     before = wait_for(lambda: via_local_socks(proxy_port, trap.server_address[1]))

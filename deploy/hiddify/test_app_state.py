@@ -107,12 +107,19 @@ class AppStateTests(unittest.TestCase):
                                         "server_port": node.server_address[1], "version": "5"})
                         return data
 
-                    original = mock_proxies(fixture())
+                    # The deployed profile hides the country endpoints and exposes
+                    # an Auto (backup) alias, which an existing user may select.
+                    original = json.loads(automatic_profile(json.dumps(fixture()), AGENT))
+                    for out in original["outbounds"]:
+                        if out.get("type") == "vless":
+                            out["tag"] += " §hide§"
+                        elif out.get("tag") == "Auto":
+                            out["outbounds"] = [tag + " §hide§" for tag in out["outbounds"]]
+                    original = mock_proxies(original)
                     call("Start", string_field(2, parse(original)))
                     self.assertTrue(wait_for(lambda: (status().get("core") or {}).get("coreState") == "STARTED"),
                                     "the original client profile did not connect")
-                    # A previously selected individual node must not remain pinned after update.
-                    call("SelectOutbound", string_field(1, "select") + string_field(2, "DE"))
+                    call("SelectOutbound", string_field(1, "select") + string_field(2, "Auto (backup)"))
                     updated = mock_proxies(json.loads(automatic_profile(json.dumps(fixture()), AGENT)))
                     call("HotReload", string_field(2, parse(updated)))
 
@@ -123,13 +130,15 @@ class AppStateTests(unittest.TestCase):
                         for group in (current.get("proxies") or {}).get("items", []):
                             if group.get("tag") == "select":
                                 tags = {item.get("tag") for item in group.get("items", [])}
-                                if {"Auto", "Auto (backup)", "lowest", "balance"} <= tags:
+                                if {"Auto", "Auto (backup)", "lowest", "balance", "NL", "DE", "PL"} <= tags:
                                     return group
                         return None
 
                     selected = wait_for(updated_select, 25)
                     self.assertIsNotNone(selected, "Hiddify did not reconnect with the automatic profile")
-                    self.assertNotEqual(selected.get("selected"), "DE")
+                    # Some versions preserve the prior alias while others fall back
+                    # to the configured default; either remains selectable.
+                    self.assertIn(selected.get("selected"), {"Auto (backup)", "balance", "lowest", "Auto"})
                 finally:
                     if channel:
                         channel.close()

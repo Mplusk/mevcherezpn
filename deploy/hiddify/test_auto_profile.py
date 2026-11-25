@@ -31,7 +31,7 @@ class AutomaticProfileTests(unittest.TestCase):
                       "sing-box/1.13", "Dart/3", "Mozilla/5.0"):
             self.assertFalse(supported_client(agent), agent)
 
-    def test_profile_groups_always_lead_to_the_same_balancer_and_preserve_credentials(self):
+    def test_auto_group_exposes_manual_nodes_and_preserves_credentials(self):
         original = fixture()
         result = json.loads(automatic_profile(json.dumps(original), AGENT))
         auto, alias, *other = result["outbounds"]
@@ -42,7 +42,8 @@ class AutomaticProfileTests(unittest.TestCase):
         proxies = [out for out in other if out["type"] == "vless"]
         self.assertEqual(auto["outbounds"], [out["tag"] for out in proxies])
         self.assertEqual(len(proxies), 3)
-        self.assertTrue(all("§hide§" in out["tag"] for out in proxies))
+        self.assertEqual([out["tag"] for out in proxies], ["NL", "DE", "PL"])
+        self.assertTrue(all("§hide§" not in out["tag"] for out in proxies))
         self.assertTrue(all("direct" != tag for tag in auto["outbounds"]))
         for before, after in zip(original["outbounds"][2:5], proxies):
             self.assertEqual({k: v for k, v in after.items() if k != "tag"},
@@ -79,6 +80,7 @@ class AutomaticProfileTests(unittest.TestCase):
         bad = fixture(); bad["outbounds"][1]["outbounds"].append("NL"); cases.append(bad)
         bad = fixture(); bad["outbounds"][2]["detour"] = "direct"; cases.append(bad)
         bad = fixture(); bad["outbounds"][2]["encryption"] = "some-new-mode"; cases.append(bad)
+        bad = fixture(); bad["outbounds"][2]["tag"] = "NL §hide§"; bad["outbounds"][1]["outbounds"][0] = "NL §hide§"; cases.append(bad)
         bad = fixture(); bad["outbounds"].append({"type": "direct", "tag": "untrusted"}); cases.append(bad)
         bad = fixture(); bad["outbounds"][3]["tag"] = "NL"; cases.append(bad)
         bad = fixture(); bad["route"] = {"final": "Select"}; cases.append(bad)

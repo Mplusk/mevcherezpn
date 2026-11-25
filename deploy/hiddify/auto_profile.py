@@ -1,9 +1,8 @@
-"""Make the panel's VLESS subscription choose one healthy node in Hiddify.
+"""Expose individual VPN nodes and an automatic latency-based group in Hiddify.
 
 Hiddify rebuilds profiles and ignores the panel's selector and URL-test group.
-Its core keeps balancers and hides tags containing ``§hide§``. Two visible
-groups are needed for Hiddify 5's connectivity status; both lead to the same
-automatic group, whose members are independent endpoints.
+Its core keeps balancers, so Auto provides a latency-based option while the
+original node tags remain selectable. The old alias preserves saved selections.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ import re
 
 AUTO_TAG = "Auto"
 AUTO_ALIAS_TAG = "Auto (backup)"
-HIDDEN = " §hide§"
 _AGENT = re.compile(r"^HiddifyNext/(\d+)\.(\d+)(?:\.(\d+))?(?:\b|$)", re.IGNORECASE)
 _PASSTHROUGH = {("direct", "direct"), ("block", "block"), ("dns", "dns-out")}
 
@@ -75,21 +73,19 @@ def automatic_profile(text: str, user_agent: str) -> str:
                  and out is not selectors[0] and out.get("tag") not in members]
     if any((out.get("type"), out.get("tag")) not in _PASSTHROUGH for out in remaining):
         return text
-    hidden_tags = [tag if "§hide§" in tag else tag + HIDDEN for tag in members]
-    if ({AUTO_TAG, AUTO_ALIAS_TAG} & set(hidden_tags)
-            or len(set(hidden_tags)) != len(hidden_tags)):
+    if ({AUTO_TAG, AUTO_ALIAS_TAG} & set(members)
+            or any("§hide§" in tag for tag in members)):
         return text
-    if any(tag in {out.get("tag") for out in remaining} for tag in hidden_tags):
+    if {AUTO_TAG, AUTO_ALIAS_TAG} & {out.get("tag") for out in remaining}:
         return text
-    hidden_proxies = []
-    for proxy, tag in zip(proxies, hidden_tags):
+    visible_proxies = []
+    for proxy in proxies:
         item = copy.deepcopy(proxy)
-        item["tag"] = tag
         item.pop("encryption", None)
-        hidden_proxies.append(item)
+        visible_proxies.append(item)
     auto = {
         "type": "balancer", "tag": AUTO_TAG, "strategy": "lowest-delay",
-        "outbounds": hidden_tags, "tolerance": 20, "delay_acceptable_ratio": 2,
+        "outbounds": members, "tolerance": 20, "delay_acceptable_ratio": 2,
         "interrupt_exist_connections": True,
     }
     alias = {
@@ -98,5 +94,5 @@ def automatic_profile(text: str, user_agent: str) -> str:
         "interrupt_exist_connections": True,
     }
     result = copy.deepcopy(profile)
-    result["outbounds"] = [auto, alias, *hidden_proxies, *remaining]
+    result["outbounds"] = [auto, alias, *visible_proxies, *remaining]
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))

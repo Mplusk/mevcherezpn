@@ -1,7 +1,7 @@
 name: VPN external monitor
 on:
   schedule:
-    - cron: '13,28,43,58 * * * *'
+    - cron: '2,17,32,47 * * * *'
   workflow_dispatch:
     inputs:
       test_email:
