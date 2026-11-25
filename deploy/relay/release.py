@@ -67,16 +67,20 @@ def probe(routes, root=ROOT):
     status, _ = request(host, 8443, '/')
     if status != 404:
         raise RuntimeError('unexpected relay root')
+    status, page = request(host, 443, '/')
+    if status != 200 or b'id="world"' not in page:
+        raise RuntimeError('public site unavailable')
     invalid = '/' + parent_path + '/' + str(uuid.uuid4()) + '/'
-    status, body = request(host, 8443, invalid, {'User-Agent': AGENT})
-    if status not in (302, 401, 403, 404):
-        raise RuntimeError('unknown user was not rejected')
-    try:
-        decoded = json.loads(body)
-    except (ValueError, UnicodeDecodeError):
-        decoded = None
-    if isinstance(decoded, dict) and decoded.get('outbounds'):
-        raise RuntimeError('unknown user received a profile')
+    for port in (443, 8443):
+        status, body = request(host, port, invalid, {'User-Agent': AGENT})
+        if status not in (302, 401, 403, 404):
+            raise RuntimeError('unknown user was not rejected')
+        try:
+            decoded = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            decoded = None
+        if isinstance(decoded, dict) and decoded.get('outbounds'):
+            raise RuntimeError('unknown user received a profile')
     status, body = request(host, 443, '/' + admin_path + '/api/v2/admin/user/',
                            {'Hiddify-API-Key': key})
     if status == 404:
@@ -89,13 +93,14 @@ def probe(routes, root=ROOT):
     active = [item for item in users if item.get('is_active') and item.get('uuid')]
     if active:
         user_id = str(uuid.UUID(str(active[0]['uuid'])))
-        status, body = request(host, 8443, '/' + parent_path + '/' + user_id + '/',
-                               {'User-Agent': AGENT})
-        if status != 200:
-            raise RuntimeError('existing subscription unavailable')
-        profile = json.loads(body)
-        if not isinstance(profile, dict) or not profile.get('outbounds'):
-            raise RuntimeError('existing subscription is incomplete')
+        for port in (443, 8443):
+            status, body = request(host, port, '/' + parent_path + '/' + user_id + '/',
+                                   {'User-Agent': AGENT})
+            if status != 200:
+                raise RuntimeError('existing subscription unavailable')
+            profile = json.loads(body)
+            if not isinstance(profile, dict) or not profile.get('outbounds'):
+                raise RuntimeError('existing subscription is incomplete')
 
 
 class Runner:
@@ -236,10 +241,18 @@ class Deployment:
 
 def main():
     import sys
+    import importlib.util
     os.umask(0o077)
     if len(sys.argv) != 3 or sys.argv[1] != 'apply' or os.geteuid() != 0:
         raise RuntimeError('invalid deployment invocation')
-    changed = Deployment().apply(sys.argv[2])
+    # Bring up and verify the new 443 route while the old relay is still public.
+    # A failed check rolls the gateway back before the public 8443 binding changes.
+    spec = importlib.util.spec_from_file_location('life_gateway', SOURCE / 'life' / 'gateway.py')
+    site = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(site)
+    routes = private_json(ROOT / 'subscription-relay-backup' / 'routes.json')
+    site_changed = site.install(ROOT, verify=lambda: probe(routes))
+    changed = Deployment().apply(sys.argv[2]) or site_changed
     print('RELAY_STATUS ' + ('updated' if changed else 'unchanged'))
 
 
