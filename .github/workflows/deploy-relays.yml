@@ -33,6 +33,10 @@ jobs:
             host_secret: RELAY_B_HOST
             fingerprint_secret: RELAY_B_FINGERPRINT
             key_secret: RELAY_B_KEY
+          - slot: c
+            host_secret: RELAY_C_HOST
+            fingerprint_secret: RELAY_C_FINGERPRINT
+            key_secret: RELAY_C_KEY
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
