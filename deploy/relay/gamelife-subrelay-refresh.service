@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh VPN backup subscription relay certificate
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker compose -p gamelife-subrelay -f /root/services/gamelife-vpn/subscription-relay-backup/compose.yaml exec -T relay caddy reload --force --config /etc/caddy/Caddyfile --adapter caddyfile

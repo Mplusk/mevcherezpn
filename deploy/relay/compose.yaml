@@ -1,0 +1,29 @@
+services:
+  relay:
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - gateway_data:/shared:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"
+volumes:
+  gateway_data:
+    external: true
+    name: gamelife-gateway_data

@@ -1,0 +1,91 @@
+name: Deploy backup relays
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Verify]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gamelife-backup-relays
+  cancel-in-progress: false
+jobs:
+  release:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - slot: a
+            host_secret: RELAY_A_HOST
+            fingerprint_secret: RELAY_A_FINGERPRINT
+            key_secret: RELAY_A_KEY
+          - slot: b
+            host_secret: RELAY_B_HOST
+            fingerprint_secret: RELAY_B_FINGERPRINT
+            key_secret: RELAY_B_KEY
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - name: Require the current main revision to have passed Verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_SHA" =~ ^[a-f0-9]{40}$ ]]
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$main_sha" == "$DEPLOY_SHA" ]] || { echo 'Main has a newer revision'; exit 1; }
+          count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&event=push&status=success&per_page=1" --jq .total_count)"
+          [[ "$count" -ge 1 ]] || { echo 'The revision has not passed Verify'; exit 1; }
+      - name: Deploy verified relay
+        env:
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_HOST: ${{ secrets[matrix.host_secret] }}
+          HOST_FINGERPRINT: ${{ secrets[matrix.fingerprint_secret] }}
+          SSH_KEY: ${{ secrets[matrix.key_secret] }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${DEPLOY_HOST:?missing relay host}" "${HOST_FINGERPRINT:?missing host fingerprint}" "${SSH_KEY:?missing relay key}"
+          [[ "$DEPLOY_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]]
+          tmp="$(mktemp -d "$RUNNER_TEMP/relay-ci.XXXXXX")"
+          trap 'rm -f "$tmp/key" "$tmp/hosts" "$tmp/result" "$tmp/error"; rmdir "$tmp"' EXIT
+          printf '%s\n' "$SSH_KEY" > "$tmp/key"
+          unset SSH_KEY
+          python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=p.read_bytes().replace(b"\r\n",b"\n"); b=b.replace(b"\\n",b"\n") if b.count(b"\n")<=1 and b"\\n" in b else b; p.write_bytes(b.rstrip(b"\n")+b"\n")' "$tmp/key"
+          ssh-keygen -y -P '' -f "$tmp/key" >/dev/null 2>&1 || { echo 'Relay key is not usable'; exit 1; }
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 20 -t ed25519 "$DEPLOY_HOST" > "$tmp/hosts" 2>/dev/null; then break; fi
+            sleep 3
+          done
+          [[ -s "$tmp/hosts" ]] || { echo 'Relay SSH host key unavailable'; exit 1; }
+          actual="$(ssh-keygen -lf "$tmp/hosts" | awk '{print $2}' | sort -u)"
+          [[ "$actual" == "$HOST_FINGERPRINT" ]] || { echo 'Relay SSH host key mismatch'; exit 1; }
+          if ! ssh -T -i "$tmp/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+               -o ConnectTimeout=40 -o ServerAliveInterval=15 -o ServerAliveCountMax=6 \
+               -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$tmp/hosts" \
+               "root@$DEPLOY_HOST" "relay-deploy $DEPLOY_SHA" > "$tmp/result" 2> "$tmp/error"; then
+            grep -Ex 'RELAY_ERROR (deployment_failed|rollback_incomplete|denied_or_failed)' "$tmp/result" || true
+            echo 'Relay deployment failed; inspect the relay locally'
+            exit 1
+          fi
+          grep -Ex 'RELAY_STATUS (updated|unchanged)' "$tmp/result" >/dev/null || {
+            echo 'Relay returned an unexpected deployment result'; exit 1;
+          }
+          grep -Ex 'RELAY_STATUS (updated|unchanged)' "$tmp/result"

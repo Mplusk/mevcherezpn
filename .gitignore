@@ -5,3 +5,15 @@
 *.key
 /vpn-api
 /vpn-api.exe
+
+# Local diagnostics, migration archives and generated subscription routes can
+# contain credentials or user-specific links. Keep them out of Git.
+/.diagnostics/
+/.migration-*
+/.domain-response.tmp
+/.*.py
+/.*.sh
+/deploy/relay/Caddyfile
+/deploy/relay/routes.json
+__pycache__/
+*.py[cod]
