@@ -31,7 +31,16 @@ def site_block(html):
     # Braces in CSS and JavaScript must not be interpreted as Caddy placeholders.
     escaped = html.replace('{', r'\{')
     indented = '\n'.join('\t\t\t' + line for line in escaped.splitlines())
-    return (BEGIN + '\thandle /assets/geodata/geoip.dat {\n'
+    return (BEGIN + ''.join(
+        '\thandle /assets/geodata/' + name + ' {\n'
+        '\t\troot * /data/public-geodata/current\n'
+        '\t\trewrite * /' + name + '\n'
+        '\t\theader Content-Type application/octet-stream\n'
+        '\t\theader X-Content-Type-Options nosniff\n'
+        '\t\theader Cache-Control "public, max-age=3600"\n'
+        '\t\tfile_server\n\t}\n'
+        for name in ('geoip-ru-blocked.srs', 'geosite-ru-blocked.srs')
+    ) + '\thandle /assets/geodata/geoip.dat {\n'
             '\t\troot * /data/public-geodata/current\n'
             '\t\trewrite * /geoip.dat\n'
             '\t\theader Content-Type application/octet-stream\n'

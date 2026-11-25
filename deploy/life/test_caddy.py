@@ -59,6 +59,7 @@ class CaddyTests(unittest.TestCase):
         release.mkdir(mode=0o755)
         (cls.geodata / 'current').symlink_to('revision', target_is_directory=True)
         for name, data in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite'),
+                           ('geoip-ru-blocked.srs', b'test ip srs'), ('geosite-ru-blocked.srs', b'test site srs'),
                            ('other.dat', b'private other file')]:
             (release / name).write_bytes(data)
             (release / name).chmod(0o644)
@@ -113,7 +114,8 @@ class CaddyTests(unittest.TestCase):
             self.assertEqual(self.get(path)[0], 404)
 
     def test_only_exact_geodata_files_are_public(self):
-        for name, expected in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite')]:
+        for name, expected in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite'),
+                               ('geoip-ru-blocked.srs', b'test ip srs'), ('geosite-ru-blocked.srs', b'test site srs')]:
             with self.subTest(name=name):
                 status, body, headers = self.get('/assets/geodata/' + name)
                 self.assertEqual((status, body), (200, expected))

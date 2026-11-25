@@ -35,6 +35,8 @@ class SiteTests(unittest.TestCase):
         block = site_block(self.html)
         self.assertIn('handle /assets/geodata/geoip.dat {', block)
         self.assertIn('handle /assets/geodata/geosite.dat {', block)
+        self.assertIn('handle /assets/geodata/geoip-ru-blocked.srs {', block)
+        self.assertIn('handle /assets/geodata/geosite-ru-blocked.srs {', block)
         self.assertIn('root * /data/public-geodata/current', block)
         self.assertIn('rewrite * /geoip.dat', block)
         self.assertIn('rewrite * /geosite.dat', block)
