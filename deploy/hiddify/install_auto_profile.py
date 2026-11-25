@@ -17,13 +17,25 @@ NEW = '''        data = self._render_core_config(core, c, pretty=True)
         return add_headers(data, c, "application/json")
 '''
 
+HEADERS_OLD = '''    resp.headers["profile-title"] = "base64:" + hutils.encode.do_base_64(c["profile_title"])
+
+    return resp
+'''
+HEADERS_NEW = '''    resp.headers["profile-title"] = "base64:" + hutils.encode.do_base_64(c["profile_title"])
+
+    from hiddifypanel.panel.user.gamelife_happ_routing import add_routing_header
+    return add_routing_header(resp, request.user_agent.string)
+'''
+
 
 def transform_source(source: str) -> str:
-    if source.count(OLD) == 0 and source.count(NEW) == 1:
-        return source
-    if source.count(OLD) != 1 or source.count(NEW) != 0:
-        raise ValueError("unexpected Hiddify subscription implementation")
-    updated = source.replace(OLD, NEW, 1)
+    updated = source
+    for old, new in ((OLD, NEW), (HEADERS_OLD, HEADERS_NEW)):
+        if updated.count(old) == 0 and updated.count(new) == 1:
+            continue
+        if updated.count(old) != 1 or updated.count(new) != 0:
+            raise ValueError("unexpected Hiddify subscription implementation")
+        updated = updated.replace(old, new, 1)
     ast.parse(updated)
     return updated
 
@@ -33,11 +45,13 @@ def main() -> None:
     target = directory / "user.py"
     source = target.read_text(encoding="utf-8")
     updated = transform_source(source)
-    module = directory / "gamelife_auto_profile.py"
-    content = Path(__file__).with_name("auto_profile.py").read_bytes()
-    if not module.is_file() or module.read_bytes() != content:
-        module.write_bytes(content)
-        module.chmod(0o644)
+    for target_name, source_name in (("gamelife_auto_profile.py", "auto_profile.py"),
+                                     ("gamelife_happ_routing.py", "happ_routing.py")):
+        module = directory / target_name
+        content = Path(__file__).with_name(source_name).read_bytes()
+        if not module.is_file() or module.read_bytes() != content:
+            module.write_bytes(content)
+            module.chmod(0o644)
     if updated != source:
         target.write_text(updated, encoding="utf-8")
 

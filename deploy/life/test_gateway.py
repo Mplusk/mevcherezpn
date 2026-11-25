@@ -31,6 +31,16 @@ class SiteTests(unittest.TestCase):
         self.assertEqual(result.count(END), 1)
         self.assertEqual(transform(result, self.html), result)
 
+    def test_geodata_handler_is_exact_and_uses_public_directory(self):
+        block = site_block(self.html)
+        self.assertIn('handle /assets/geodata/geoip.dat {', block)
+        self.assertIn('handle /assets/geodata/geosite.dat {', block)
+        self.assertIn('root * /data/public-geodata/current', block)
+        self.assertIn('rewrite * /geoip.dat', block)
+        self.assertIn('rewrite * /geosite.dat', block)
+        self.assertIn('file_server\n', block)
+        self.assertNotIn('file_server browse', block)
+
     def test_rejects_ambiguous_or_partial_handlers(self):
         with self.assertRaises(ValueError):
             transform(self.original + self.original, self.html)

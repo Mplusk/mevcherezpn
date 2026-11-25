@@ -53,8 +53,19 @@ class CaddyTests(unittest.TestCase):
         config_path = Path(cls.temp.name) / 'Caddyfile'
         config_path.write_text(config, encoding='utf-8')
         config_path.chmod(0o644)
+        cls.geodata = Path(cls.temp.name) / 'public-geodata'
+        cls.geodata.mkdir(mode=0o755)
+        release = cls.geodata / 'revision'
+        release.mkdir(mode=0o755)
+        (cls.geodata / 'current').symlink_to('revision', target_is_directory=True)
+        for name, data in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite'),
+                           ('other.dat', b'private other file')]:
+            (release / name).write_bytes(data)
+            (release / name).chmod(0o644)
+        (Path(cls.temp.name) / 'secret.txt').write_text('not public', encoding='utf-8')
         subprocess.run(['docker', 'run', '-d', '--network', 'host', '--name', cls.name,
-                        '-v', str(config_path) + ':/etc/caddy/Caddyfile:ro', IMAGE], check=True,
+                        '-v', str(config_path) + ':/etc/caddy/Caddyfile:ro',
+                        '-v', str(cls.geodata) + ':/data/public-geodata:ro', IMAGE], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(30):
             try:
@@ -100,6 +111,21 @@ class CaddyTests(unittest.TestCase):
                                                         'agent': 'life-ci'})
         for path in ('/legacy_path/not-a-uuid/', '/admin_path/' + USER + '/auto/'):
             self.assertEqual(self.get(path)[0], 404)
+
+    def test_only_exact_geodata_files_are_public(self):
+        for name, expected in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite')]:
+            with self.subTest(name=name):
+                status, body, headers = self.get('/assets/geodata/' + name)
+                self.assertEqual((status, body), (200, expected))
+                self.assertEqual(headers['Content-Type'], 'application/octet-stream')
+        for path in ('/assets/geodata/', '/assets/geodata/other.dat',
+                     '/assets/geodata/geoip.dat/extra', '/assets/geodata/../secret.txt',
+                     '/assets/geodata/%2e%2e/secret.txt', '/secret.txt'):
+            with self.subTest(path=path):
+                status, body, _ = self.get(path)
+                self.assertEqual(status, 404)
+                self.assertNotIn(b'not public', body)
+                self.assertNotIn(b'private other file', body)
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@ panel_files=(-f compose.panel.yaml)
 # recreates the panel; unrelated releases do not restart it.
 patch_dir="$root/hiddify-patches"
 mkdir -p "$patch_dir"
-patch_files=(fix_node_timestamps.py auto_profile.py install_auto_profile.py)
+patch_files=(fix_node_timestamps.py auto_profile.py happ_routing.py install_auto_profile.py)
 for patch_file in "${patch_files[@]}"; do
     patch_tmp="$(mktemp "$patch_dir/.hiddify-patch.XXXXXX")"
     install -m 600 "deploy/hiddify/$patch_file" "$patch_tmp"

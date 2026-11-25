@@ -34,6 +34,8 @@ jobs:
         run: |
           node --test deploy/life/life.test.js
           python3 -m unittest discover -s deploy/life -p 'test_*.py' -v
+          python3 -m unittest discover -s deploy/geo -p 'test_*.py' -v
+          sh -n deploy/geo/install.sh
   backup_relay:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -141,7 +143,7 @@ jobs:
           test_root="$test_home/services/gamelife-vpn"
           export VPN_HIDDIFY_PATCH_DIR="$test_root/hiddify-patches"
           mkdir -p "$VPN_HIDDIFY_PATCH_DIR"
-          patch_files=(fix_node_timestamps.py auto_profile.py install_auto_profile.py)
+          patch_files=(fix_node_timestamps.py auto_profile.py happ_routing.py install_auto_profile.py)
           for patch_file in "${patch_files[@]}"; do cp "deploy/hiddify/$patch_file" "$VPN_HIDDIFY_PATCH_DIR/"; done
           export VPN_HIDDIFY_PATCH_SHA="$(for patch_file in "${patch_files[@]}"; do sha256sum "$VPN_HIDDIFY_PATCH_DIR/$patch_file" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
           docker network create "$CADDY_NETWORK"

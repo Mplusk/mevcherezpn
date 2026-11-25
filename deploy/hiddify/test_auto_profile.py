@@ -2,7 +2,7 @@ import json
 import unittest
 
 from auto_profile import AUTO_ALIAS_TAG, AUTO_TAG, automatic_profile, supported_client
-from install_auto_profile import NEW, OLD, transform_source
+from install_auto_profile import HEADERS_NEW, HEADERS_OLD, NEW, OLD, transform_source
 
 
 AGENT = "HiddifyNext/5.9.15 (android) like ClashMeta v2ray sing-box"
@@ -99,9 +99,10 @@ class AutomaticProfileTests(unittest.TestCase):
 
 class InstallerTests(unittest.TestCase):
     def test_exact_hook_and_idempotence(self):
-        source = "def handler(self, core, c):\n" + OLD
+        source = "def handler(self, core, c):\n" + OLD + "\ndef add_headers(c):\n" + HEADERS_OLD
         updated = transform_source(source)
         self.assertIn(NEW, updated)
+        self.assertIn(HEADERS_NEW, updated)
         self.assertEqual(transform_source(updated), updated)
 
     def test_unknown_or_partial_source_is_rejected(self):

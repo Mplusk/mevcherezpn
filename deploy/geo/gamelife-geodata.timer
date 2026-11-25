@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh public VPN client routing data every six hours
+
+[Timer]
+OnCalendar=*-*-* 03,09,15,21:17:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=gamelife-geodata.service
+
+[Install]
+WantedBy=timers.target
