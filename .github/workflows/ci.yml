@@ -217,18 +217,18 @@ jobs:
             printf 'CADDY_NETWORK=%s\nHIDDIFY_API_KEY=\n' "$CADDY_NETWORK"
           } > "$test_root/.env"
           panel_before="$(docker compose -f compose.panel.yaml ps -q panel)"
-          (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
+          (cd "$test_release" && sudo env HOME="$test_home" bash deploy/release.sh)
           test -L "$test_root/current"
           docker run --rm --network "$CADDY_NETWORK" redis:7.4-alpine nc -z -w 5 gamelife-vpn-origin 80
           python3 deploy/smoke_panel.py
-          (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
+          (cd "$test_release" && sudo env HOME="$test_home" bash deploy/release.sh)
           test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
           gateway_image='caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0'
           docker run --rm -v "$GITHUB_WORKSPACE/deploy/Caddyfile.standalone:/etc/caddy/Caddyfile:ro" "$gateway_image" caddy validate --config /etc/caddy/Caddyfile
           mkdir -p "$test_root/gateway"
           awk '{print; if ($0 == "gamelife.shop {" || $0 == "www.gamelife.shop {") print "\ttls internal"}' deploy/Caddyfile.standalone > "$test_root/gateway/Caddyfile"
           printf 'VPN_STANDALONE_GATEWAY=1\nVPN_GATEWAY_HTTP_PORT=18081\nVPN_GATEWAY_HTTPS_PORT=18443\n' >> "$test_root/.env"
-          (cd "$test_release" && HOME="$test_home" bash deploy/release.sh)
+          (cd "$test_release" && sudo env HOME="$test_home" bash deploy/release.sh)
           test "$panel_before" = "$(docker compose -f compose.panel.yaml ps -q panel)"
           ready=no
           for attempt in $(seq 1 30); do
