@@ -33,6 +33,9 @@ class SiteTests(unittest.TestCase):
 
     def test_geodata_handler_is_exact_and_uses_public_directory(self):
         block = site_block(self.html)
+        self.assertIn('handle /assets/geodata/manifest.json {', block)
+        self.assertIn('rewrite * /manifest.json', block)
+        self.assertIn('Cache-Control "no-store"', block)
         self.assertIn('handle /assets/geodata/geoip.dat {', block)
         self.assertIn('handle /assets/geodata/geosite.dat {', block)
         self.assertIn('handle /assets/geodata/geoip-ru-blocked.srs {', block)

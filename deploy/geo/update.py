@@ -63,13 +63,13 @@ def validate_srs(data):
     if not result or len(result) > MAX_SRS_UNCOMPRESSED or not decoder.eof or decoder.unused_data:
         raise ValueError('invalid rule set payload')
 
-# The tar comes only from our two in-memory byte strings and has no directory or
+# The tar comes only from our public in-memory byte strings and has no directory or
 # symlink entries. Validate every destination before updating the current link.
 CONTAINER_SCRIPT = r'''set -eu
 root=/data/public-geodata
-rev="$1"; iphash="$2"; sitehash="$3"; srs1hash="$4"; srs2hash="$5"
-case "$rev$iphash$sitehash$srs1hash$srs2hash" in *[!0-9a-f]*|'') exit 2;; esac
-for hash in "$rev" "$iphash" "$sitehash" "$srs1hash" "$srs2hash"; do [ "${#hash}" = 64 ]; done
+rev="$1"; iphash="$2"; sitehash="$3"; srs1hash="$4"; srs2hash="$5"; manifesthash="$6"
+case "$rev$iphash$sitehash$srs1hash$srs2hash$manifesthash" in *[!0-9a-f]*|'') exit 2;; esac
+for hash in "$rev" "$iphash" "$sitehash" "$srs1hash" "$srs2hash" "$manifesthash"; do [ "${#hash}" = 64 ]; done
 if [ -e "$root" ] || [ -L "$root" ]; then [ -d "$root" ] && [ ! -L "$root" ]; else mkdir -m 755 "$root"; fi
 if [ -e "$root/revisions" ] || [ -L "$root/revisions" ]; then [ -d "$root/revisions" ] && [ ! -L "$root/revisions" ]; else mkdir -m 755 "$root/revisions"; fi
 stage=$(mktemp -d "$root/revisions/.stage.XXXXXX")
@@ -84,13 +84,17 @@ for pair in "geosite-ru-blocked.srs:$srs1hash" "geoip-ru-blocked.srs:$srs2hash";
  file=${pair%:*}; hash=${pair#*:}; [ -f "$stage/$file" ] && [ ! -L "$stage/$file" ]
  [ "$(sha256sum "$stage/$file" | cut -d " " -f 1)" = "$hash" ]
 done
-chmod 644 "$stage/geoip.dat" "$stage/geosite.dat" "$stage/geosite-ru-blocked.srs" "$stage/geoip-ru-blocked.srs"
+[ -f "$stage/manifest.json" ] && [ ! -L "$stage/manifest.json" ]
+[ "$(sha256sum "$stage/manifest.json" | cut -d " " -f 1)" = "$manifesthash" ]
+chmod 644 "$stage/geoip.dat" "$stage/geosite.dat" "$stage/geosite-ru-blocked.srs" "$stage/geoip-ru-blocked.srs" "$stage/manifest.json"
 target="$root/revisions/$rev"
 if [ -e "$target" ] || [ -L "$target" ]; then
  [ -d "$target" ] && [ ! -L "$target" ]
  [ ! -L "$target/geoip.dat" ] && [ ! -L "$target/geosite.dat" ]
  [ "$(sha256sum "$target/geoip.dat" | cut -d " " -f 1)" = "$iphash" ]
  [ "$(sha256sum "$target/geosite.dat" | cut -d " " -f 1)" = "$sitehash" ]
+ [ -f "$target/manifest.json" ] && [ ! -L "$target/manifest.json" ]
+ [ "$(sha256sum "$target/manifest.json" | cut -d " " -f 1)" = "$manifesthash" ]
  for pair in "geosite-ru-blocked.srs:$srs1hash" "geoip-ru-blocked.srs:$srs2hash"; do
   file=${pair%:*}; hash=${pair#*:}; [ -f "$target/$file" ] && [ ! -L "$target/$file" ]
   [ "$(sha256sum "$target/$file" | cut -d " " -f 1)" = "$hash" ]
@@ -115,11 +119,23 @@ for entry in $(ls -1t "$root/revisions"); do
 done
 '''
 
+def revision_for(hashes):
+    return hashlib.sha256(b'gamelife-geo-manifest-v1\x00' + json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+
+def manifest_bytes(files):
+    if set(files) != set(URLS):
+        raise ValueError('invalid asset names')
+    hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+    revision = revision_for(hashes)
+    return (json.dumps({'version': 1, 'revision': revision, 'sha256': hashes},
+                       sort_keys=True, separators=(',', ':')) + '\n').encode('ascii')
+
 def make_tar(files):
     data = io.BytesIO()
     with tarfile.open(fileobj=data, mode='w') as archive:
-        for name in DAT_NAMES + SRS_NAMES:
-            content = files[name]
+        manifest = manifest_bytes(files)
+        for name in DAT_NAMES + SRS_NAMES + ('manifest.json',):
+            content = manifest if name == 'manifest.json' else files[name]
             info = tarfile.TarInfo(name)
             info.size = len(content)
             info.mode = 0o644
@@ -130,13 +146,14 @@ def push(files, revision, runner=subprocess.run):
     if set(files) != set(URLS) or not re.fullmatch('[0-9a-f]{64}', revision):
         raise ValueError('invalid revision')
     hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
-    expected_revision = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+    expected_revision = revision_for(hashes)
     if expected_revision != revision:
         raise ValueError('revision mismatch')
     for name in SRS_NAMES:
         validate_srs(files[name])
+    manifest_hash = hashlib.sha256(manifest_bytes(files)).hexdigest()
     result = runner(['docker', 'exec', '-i', CONTAINER, 'sh', '-c', CONTAINER_SCRIPT, '--',
-                     revision, *(hashes[name] for name in DAT_NAMES + SRS_NAMES)],
+                     revision, *(hashes[name] for name in DAT_NAMES + SRS_NAMES), manifest_hash],
                     input=make_tar(files), stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL, timeout=120, check=False)
     if result.returncode:
@@ -152,7 +169,7 @@ def run():
         files = {name: (target / 'revisions' / dat_revision / name).read_bytes() for name in DAT_NAMES}
         files.update({name: (source / name).read_bytes() for name in SRS_NAMES})
         hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
-        revision = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+        revision = revision_for(hashes)
         push(files, revision)
         print('GEODATA_UPDATED ' + revision)
 

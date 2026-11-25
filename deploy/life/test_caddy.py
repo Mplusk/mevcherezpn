@@ -60,6 +60,7 @@ class CaddyTests(unittest.TestCase):
         (cls.geodata / 'current').symlink_to('revision', target_is_directory=True)
         for name, data in [('geoip.dat', b'test geoip'), ('geosite.dat', b'test geosite'),
                            ('geoip-ru-blocked.srs', b'test ip srs'), ('geosite-ru-blocked.srs', b'test site srs'),
+                           ('manifest.json', b'{"version":1}'),
                            ('other.dat', b'private other file')]:
             (release / name).write_bytes(data)
             (release / name).chmod(0o644)
@@ -120,6 +121,10 @@ class CaddyTests(unittest.TestCase):
                 status, body, headers = self.get('/assets/geodata/' + name)
                 self.assertEqual((status, body), (200, expected))
                 self.assertEqual(headers['Content-Type'], 'application/octet-stream')
+        status, body, headers = self.get('/assets/geodata/manifest.json')
+        self.assertEqual((status, json.loads(body)), (200, {'version': 1}))
+        self.assertEqual(headers['Content-Type'], 'application/json')
+        self.assertEqual(headers['Cache-Control'], 'no-store')
         for path in ('/assets/geodata/', '/assets/geodata/other.dat',
                      '/assets/geodata/geoip.dat/extra', '/assets/geodata/../secret.txt',
                      '/assets/geodata/%2e%2e/secret.txt', '/secret.txt'):

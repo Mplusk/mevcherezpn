@@ -31,7 +31,14 @@ def site_block(html):
     # Braces in CSS and JavaScript must not be interpreted as Caddy placeholders.
     escaped = html.replace('{', r'\{')
     indented = '\n'.join('\t\t\t' + line for line in escaped.splitlines())
-    return (BEGIN + ''.join(
+    return (BEGIN + '\thandle /assets/geodata/manifest.json {\n'
+            '\t\troot * /data/public-geodata/current\n'
+            '\t\trewrite * /manifest.json\n'
+            '\t\theader Content-Type application/json\n'
+            '\t\theader X-Content-Type-Options nosniff\n'
+            '\t\theader Cache-Control "no-store"\n'
+            '\t\tfile_server\n'
+            '\t}\n' + ''.join(
         '\thandle /assets/geodata/' + name + ' {\n'
         '\t\troot * /data/public-geodata/current\n'
         '\t\trewrite * /' + name + '\n'
