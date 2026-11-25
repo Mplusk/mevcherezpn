@@ -24,7 +24,7 @@ def read_state(path):
     return None
 
 
-def send_email(sender, password, recipient, state, test):
+def send_email(sender, password, recipient, state, test, *, source="github"):
     if any("\n" in value or "\r" in value for value in (sender, recipient)):
         raise ValueError("invalid address")
     if any(not parseaddr(value)[1] or parseaddr(value)[1] != value for value in (sender, recipient)):
@@ -34,7 +34,10 @@ def send_email(sender, password, recipient, state, test):
     msg["Subject"] = "Проверка VPN: тестовое сообщение" if test else "Проверка VPN: изменение состояния"
     lines = ["Тестовое уведомление мониторинга VPN." if test else "Состояние проверок VPN изменилось.", ""]
     lines += [f"{LABELS[key]}: {WORDS[state[key]]}" for key in ("de", "pl", "nl", "subscription")]
-    lines += ["", "Результат относится к одной внешней сети GitHub Actions."]
+    sources = {"github": "GitHub Actions", "control": "основной VPS", "nl": "VPS Нидерланды"}
+    if source not in sources:
+        raise ValueError("invalid monitoring source")
+    lines += ["", f"Точка проверки: {sources[source]}. Результаты относятся только к этой сети."]
     msg.set_content("\n".join(lines))
     with smtplib.SMTP_SSL("smtp.spaceweb.ru", 465, context=ssl.create_default_context(), timeout=20) as smtp:
         smtp.login(sender, password)
@@ -47,6 +50,7 @@ def main():
     current = read_state(result_path) or dict.fromkeys(KEYS, "unknown")
     previous = read_state(state_path)
     test = os.environ.get("MONITOR_TEST_EMAIL", "false").lower() == "true"
+    source = os.environ.get("MONITOR_SOURCE", "github")
     sender = os.environ.pop("MONITOR_SMTP_USERNAME", "")
     password = os.environ.pop("MONITOR_SMTP_PASSWORD", "")
     recipient = os.environ.pop("MONITOR_ALERT_TO", "")
@@ -56,7 +60,7 @@ def main():
     should_send = test or (previous is None and any(value != "ok" for value in current.values())) or (previous is not None and previous != current)
     if should_send:
         try:
-            send_email(sender, password, recipient, current, test)
+            send_email(sender, password, recipient, current, test, source=source)
         except (OSError, ValueError, smtplib.SMTPException):
             print("ALERT_SEND_FAILED", flush=True)
             return 1

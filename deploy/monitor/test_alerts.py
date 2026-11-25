@@ -78,13 +78,14 @@ class AlertTests(unittest.TestCase):
 
     @patch("alerts.smtplib.SMTP_SSL")
     def test_tls_and_test_subject(self, smtp):
-        alerts.send_email("sender@example.com", "test-password", "receiver@example.com", self.ok, True)
+        alerts.send_email("sender@example.com", "test-password", "receiver@example.com", self.ok, True, source="nl")
         self.assertEqual(smtp.call_args.args, ("smtp.spaceweb.ru", 465))
         client = smtp.return_value.__enter__.return_value
         client.login.assert_called_once_with("sender@example.com", "test-password")
         msg = client.send_message.call_args.args[0]
         self.assertIn("тестовое", msg["Subject"])
         self.assertNotIn("test-password", str(msg))
+        self.assertIn("Нидерланды", msg.get_content())
 
 
 if __name__ == "__main__":

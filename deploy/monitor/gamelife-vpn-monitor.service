@@ -1,0 +1,20 @@
+[Unit]
+Description=GameLife VPN standby end-to-end checks
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+RuntimeDirectory=gamelife-vpn-monitor
+RuntimeDirectoryMode=0700
+StateDirectory=gamelife-vpn-monitor
+StateDirectoryMode=0700
+TimeoutStartSec=480
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/gamelife-vpn-monitor /run/gamelife-vpn-monitor
+ExecStart=/usr/bin/python3 /opt/gamelife-vpn-monitor/host_runner.py

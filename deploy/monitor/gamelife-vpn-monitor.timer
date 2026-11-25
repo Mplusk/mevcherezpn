@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic GameLife VPN standby checks
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
