@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh public routing assets every six hours
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:37:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=gamelife-ru-assets.service
+
+[Install]
+WantedBy=timers.target

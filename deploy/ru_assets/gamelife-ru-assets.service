@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh public routing assets for Xray and Hiddify
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0022
+ExecStart=/usr/bin/python3 /opt/gamelife-ru-assets/sync.py
+TimeoutStartSec=360
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/root/services/gamelife-vpn/ru-assets

@@ -3,6 +3,38 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  routing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Test routing guards and real Xray priorities
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s deploy/ru_guard -p 'test_*.py' -v
+          python3 -m unittest discover -s deploy/ru_assets -p 'test_*.py' -v
+          archive="$RUNNER_TEMP/routing-xray.zip"
+          curl -fsSL --retry 3 https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-64.zip -o "$archive"
+          echo 'b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82  '"$archive" | sha256sum -c -
+          unzip -q "$archive" xray -d "$RUNNER_TEMP/routing-xray"
+          export XRAY_BIN="$RUNNER_TEMP/routing-xray/xray" REQUIRE_XRAY_ROUTING_TESTS=1
+          python3 -m unittest discover -s deploy/routing/tests -p 'test_*.py' -v
+          mkdir -p "$RUNNER_TEMP/official-srs"
+          geo_base='https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/7d75d96cae2544a7b9501538702ae156f465dc4a/sing-box'
+          curl -fsSL --retry 3 "$geo_base/rule-set-geosite/geosite-ru-blocked.srs" -o "$RUNNER_TEMP/official-srs/geosite-ru-blocked.srs"
+          curl -fsSL --retry 3 "$geo_base/rule-set-geoip/geoip-ru-blocked.srs" -o "$RUNNER_TEMP/official-srs/geoip-ru-blocked.srs"
+          echo '28da75296f79cdc541cf21ae19f5aa1b03bc948572c4d4dc2f33532c372991ff  '"$RUNNER_TEMP/official-srs/geosite-ru-blocked.srs" | sha256sum -c -
+          echo '3b8c597366bf4e4fe01a2eb7b8dc8f20fdf25a669da8aca69697b725b2e68050  '"$RUNNER_TEMP/official-srs/geoip-ru-blocked.srs" | sha256sum -c -
+          docker run --rm --network none \
+            -e HIDDIFY_PANEL_CORE=/usr/bin/hiddify-core -e REQUIRE_SING_GUARD_TESTS=1 \
+            -e TEST_SRS_DIR=/opt/hiddify-manager/services/xray/bin/gamelife/current -e REQUIRE_LOCAL_SRS_TESTS=1 \
+            -v "$PWD/deploy/routing/tests/test_sing_guard.py:/tmp/test_sing_guard.py:ro" \
+            -v "$RUNNER_TEMP/official-srs:/opt/hiddify-manager/services/xray/bin/gamelife/current:ro" \
+            --entrypoint /opt/hiddify-manager/.venv313/bin/python \
+            ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9 \
+            /tmp/test_sing_guard.py
   vpn_monitor:
     runs-on: ubuntu-latest
     steps:
