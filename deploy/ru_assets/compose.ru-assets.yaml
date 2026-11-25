@@ -1,0 +1,17 @@
+services:
+  panel:
+    volumes:
+      - type: bind
+        source: ${VPN_RU_ASSET_ROOT:?set the validated routing assets directory}
+        target: /opt/hiddify-manager/services/xray/bin/gamelife
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      gateway:
+        aliases: [gamelife-vpn-origin]
+
+networks:
+  gateway:
+    external: true
+    name: ${CADDY_NETWORK:?set the existing Caddy network}

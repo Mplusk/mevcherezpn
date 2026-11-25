@@ -17,6 +17,9 @@ API = 'https://api.github.com/repos/' + REPOSITORY
 FILES = ('renderer.py', 'release.py', 'dispatcher.py', 'compose.yaml',
          'gamelife-subrelay-refresh.service', 'gamelife-subrelay-refresh.timer')
 LIFE_FILES = ('index.html', 'life.js', 'gateway.py')
+RU_ASSET_FILES = ('installer.py', 'reduce.py', 'sync.py', 'compose.ru-assets.yaml',
+                  'compose_plan.py', 'relay_hook.py', 'gamelife-ru-assets.service',
+                  'gamelife-ru-assets.timer')
 
 
 def parse_command(command):
@@ -80,6 +83,22 @@ def check_relay():
     print('RELAY_STATUS ready', flush=True)
 
 
+def extract_ru_assets(revision, directory, env, get=None):
+    """Stage the fixed public asset installer sources without executing them."""
+    if not re.fullmatch(r'[a-f0-9]{40}', revision):
+        raise ValueError('invalid revision')
+    get = get or run
+    directory = Path(directory)
+    target = directory / 'ru_assets'
+    target.mkdir(mode=0o700)
+    for name in RU_ASSET_FILES:
+        content = get(['git', '-C', str(directory), 'show', revision + ':deploy/ru_assets/' + name],
+                      env=env, output=True)
+        fd = os.open(target / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(content)
+
+
 def deploy(revision):
     require_main(revision)
     require_verified(revision)
@@ -111,6 +130,7 @@ def deploy(revision):
             fd = os.open(life_dir / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(content)
+        extract_ru_assets(revision, directory, env)
         require_main(revision)
         result = subprocess.run(['/usr/bin/python3', str(directory / 'release.py'), 'apply', revision],
                                 cwd=temp, env=env, stdout=subprocess.PIPE,

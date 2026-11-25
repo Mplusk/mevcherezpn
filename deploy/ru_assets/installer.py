@@ -16,6 +16,10 @@ import time
 
 ANCHOR = '      - panel:/opt/hiddify-manager/data\n'
 MARKER = '      # gamelife-ru-assets-v1\n'
+PANEL_NETWORK_ANCHOR = '    networks:\n      ingress: {}\n      storage: {}\n'
+ROOT_NETWORK_ANCHOR = 'networks:\n  ingress:\n  storage:\n    internal: true\n'
+NETWORK_MARKER = '      # gamelife-gateway-network-v1\n'
+ROOT_NETWORK_MARKER = '  # gamelife-gateway-root-v1\n'
 TARGET = '/opt/hiddify-manager/services/xray/bin/gamelife'
 CONTAINER = 'gamelife-hiddify-panel-1'
 IMAGE = 'ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9'
@@ -57,6 +61,8 @@ def validate_snapshot(snapshot, compose, expected_assets=None):
         raise ValueError('unexpected container networks')
     for name, aliases in NETWORKS.items():
         entry = networks[name]
+        if name == 'gamelife-vpn-gateway' and expected_assets is not None:
+            aliases = aliases | {'panel', 'gamelife-hiddify-panel-1'}
         if set(entry.get('Aliases') or []) != aliases or entry.get('IPAMConfig') not in ({}, None):
             raise ValueError('unexpected network aliases or static addressing')
     mounts = snapshot.get('mounts')
@@ -79,15 +85,92 @@ def restore_gateway(snapshot, runner):
                 'gamelife-vpn-gateway', CONTAINER])
 
 
-def transform(source: str, assets: Path) -> str:
-    if not assets.is_absolute() or any(c in str(assets) for c in '\n\r:$'):
+def capture(args):
+    """Never print Compose output: it contains DB and Redis passwords."""
+    result = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root', 'LANG': 'C.UTF-8'},
+                            timeout=60, check=True)
+    if len(result.stdout) > 4 * 1024 * 1024:
+        raise ValueError('inspection output too large')
+    return result.stdout
+
+
+def compare_runtime(compose: Path, envfile: Path, snapshot, get=capture):
+    """Compare declared env/image/ports/volumes in memory, suppressing values."""
+    try:
+        config = json.loads(get(['docker', 'compose', '--env-file', str(envfile), '-f', str(compose),
+                                 'config', '--format', 'json']))
+        live_list = json.loads(get(['docker', 'inspect', '--format', '{{json .Config.Env}}', CONTAINER]))
+        image_list = json.loads(get(['docker', 'image', 'inspect', '--format', '{{json .Config.Env}}', IMAGE]))
+        service = config['services']['panel']
+        env = service.get('environment') or {}
+        if not isinstance(env, dict) or not isinstance(live_list, list) or not isinstance(image_list, list):
+            raise ValueError('invalid environment')
+        pairs = [item.split('=', 1) for item in live_list if isinstance(item, str) and '=' in item]
+        image_pairs = [item.split('=', 1) for item in image_list if isinstance(item, str) and '=' in item]
+        live_env = dict(pairs)
+        image_env = dict(image_pairs)
+        if len(image_env) != len(image_pairs) or any(not isinstance(v, str) for v in env.values()):
+            raise ValueError('invalid image or Compose environment')
+        image_env.update(env)
+        if len(live_env) != len(pairs) or live_env != image_env:
+            raise ValueError('environment differs')
+        if service.get('image') != snapshot.get('image'):
+            raise ValueError('image differs')
+        expected_ports = {}
+        for port in service.get('ports') or []:
+            if not isinstance(port, dict) or port.get('mode', 'ingress') != 'ingress':
+                raise ValueError('unsupported port')
+            key = str(port['target']) + '/' + port.get('protocol', 'tcp')
+            expected_ports.setdefault(key, []).append((str(port.get('host_ip', '')), str(port['published'])))
+        live_ports = {key: sorted((str(v.get('HostIp', '')), str(v.get('HostPort', ''))) for v in values or [])
+                      for key, values in (snapshot.get('ports') or {}).items()}
+        if {key: sorted(values) for key, values in expected_ports.items()} != live_ports:
+            raise ValueError('port bindings differ')
+        volumes = config.get('volumes') or {}
+        expected = {}
+        for volume in service.get('volumes') or []:
+            typ = volume['type']; dest = volume['target']; source = volume.get('source')
+            if dest in expected or typ not in ('volume', 'bind'):
+                raise ValueError('unsupported volume')
+            if typ == 'volume':
+                source = volumes[source]['name']
+            elif not Path(source).is_absolute():
+                raise ValueError('relative bind source')
+            expected[dest] = (typ, source, not bool(volume.get('read_only', False)))
+        actual = {}
+        for mount in snapshot.get('mounts') or []:
+            typ = mount['Type']; dest = mount['Destination']
+            if dest in actual or typ not in ('volume', 'bind'):
+                raise ValueError('unsupported runtime mount')
+            actual[dest] = (typ, mount.get('Name') if typ == 'volume' else mount.get('Source'), mount.get('RW'))
+        if expected != actual:
+            raise ValueError('volume mounts differ')
+    except Exception:
+        # The JSON parser and subprocess exceptions can retain stdout containing
+        # secrets; never propagate either the value or the original exception.
+        raise ValueError('running container differs from Compose configuration') from None
+
+
+def transform(source: str, assets: Path, gateway_name='gamelife-vpn-gateway') -> str:
+    if (not assets.is_absolute() or any(c in str(assets) for c in '\n\r:$')
+            or not gateway_name or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in gateway_name)):
         raise ValueError('unsafe asset path')
     line = f'      - {assets}:{TARGET}:ro\n'
-    if source.count(MARKER) == 1 and source.count(line) == 1:
+    panel_gateway = NETWORK_MARKER + '      gateway:\n        aliases: [gamelife-vpn-origin]\n'
+    root_gateway = ROOT_NETWORK_MARKER + '  gateway:\n    external: true\n    name: ' + gateway_name + '\n'
+    if (source.count(MARKER) == 1 and source.count(line) == 1 and source.count(panel_gateway) == 1
+            and source.count(root_gateway) == 1):
         return source
-    if MARKER in source or TARGET in source or source.count(ANCHOR) != 1:
+    if (MARKER in source or TARGET in source or NETWORK_MARKER in source or ROOT_NETWORK_MARKER in source
+            or source.count(ANCHOR) != 1 or source.count(PANEL_NETWORK_ANCHOR) != 1
+            or source.count(ROOT_NETWORK_ANCHOR) != 1):
         raise ValueError('unexpected Compose source')
-    return source.replace(ANCHOR, ANCHOR + MARKER + line, 1)
+    panel_network = PANEL_NETWORK_ANCHOR + panel_gateway
+    root_network = ROOT_NETWORK_ANCHOR + root_gateway
+    return (source.replace(ANCHOR, ANCHOR + MARKER + line, 1)
+            .replace(PANEL_NETWORK_ANCHOR, panel_network, 1)
+            .replace(ROOT_NETWORK_ANCHOR, root_network, 1))
 
 
 def atomic(path: Path, data: bytes, mode: int) -> None:
@@ -122,7 +205,7 @@ def check_assets(root: Path) -> None:
 
 
 def install(compose: Path, assets: Path, envfile: Path, runner, verify, inspect,
-            templates_depend_on_mount) -> bool:
+            templates_depend_on_mount, baseline=compare_runtime) -> bool:
     """Patch a single validated Compose file; restore it and recreate on failure.
 
     The supplied dependency probe must query each affected node's templates and
@@ -136,6 +219,7 @@ def install(compose: Path, assets: Path, envfile: Path, runner, verify, inspect,
     updated = transform(original.decode('utf-8'), assets).encode('utf-8')
     before = inspect()
     validate_snapshot(before, compose, assets if original == updated else None)
+    baseline(compose, envfile, before)
     if original == updated:
         verify()
         return False
@@ -167,6 +251,7 @@ def install(compose: Path, assets: Path, envfile: Path, runner, verify, inspect,
             verify()
             after = inspect()
             validate_snapshot(after, compose, assets)
+            baseline(compose, envfile, after)
             if after.get('ports') != before.get('ports'):
                 raise ValueError('container port bindings changed')
         except Exception as error:
@@ -185,6 +270,7 @@ def install(compose: Path, assets: Path, envfile: Path, runner, verify, inspect,
                 verify()
                 restored = inspect()
                 validate_snapshot(restored, compose)
+                baseline(compose, envfile, restored)
                 if restored.get('ports') != before.get('ports'):
                     raise ValueError('rollback port bindings differ')
             except Exception as rollback:
