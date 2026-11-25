@@ -46,7 +46,9 @@ class CaddyTests(unittest.TestCase):
                   'parent_path': 'parent_path', 'aliases': ['parent_path', 'legacy_path']}
         backup = backup_block(routes).replace('https://parent.example.test',
                                                'http://127.0.0.1:' + str(cls.origin.server_port))
-        config = ('{\n admin off\n auto_https off\n}\n:' + str(cls.port) + ' {\n'
+        config = ('{\n admin off\n auto_https off\n}\n'
+                  + 'http://node.example.test:' + str(cls.port)
+                  + ', http://old.example.test:' + str(cls.port) + ' {\n'
                   + backup + site_block(public_html()) + '\thandle {\n\t\trespond 404\n\t}\n}\n')
         config_path = Path(cls.temp.name) / 'Caddyfile'
         config_path.write_text(config, encoding='utf-8')
@@ -72,10 +74,10 @@ class CaddyTests(unittest.TestCase):
         cls.temp.cleanup()
 
     @classmethod
-    def get(cls, path):
+    def get(cls, path, host='node.example.test'):
         connection = http.client.HTTPConnection('127.0.0.1', cls.port, timeout=5)
         try:
-            connection.request('GET', path, headers={'User-Agent': 'life-ci'})
+            connection.request('GET', path, headers={'User-Agent': 'life-ci', 'Host': host})
             response = connection.getresponse()
             return response.status, response.read(), dict(response.getheaders())
         finally:
@@ -89,11 +91,13 @@ class CaddyTests(unittest.TestCase):
             self.assertIn("default-src 'none'", headers['Content-Security-Policy'])
 
     def test_backup_rewrites_only_a_valid_alias_and_uuid(self):
-        for alias in ('parent_path', 'legacy_path'):
-            status, body, _ = self.get('/' + alias + '/' + USER + '/auto/')
-            self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body), {'path': '/parent_path/' + USER + '/auto/',
-                                                'agent': 'life-ci'})
+        for host in ('node.example.test', 'old.example.test'):
+            for alias in ('parent_path', 'legacy_path'):
+                with self.subTest(host=host, alias=alias):
+                    status, body, _ = self.get('/' + alias + '/' + USER + '/auto/', host)
+                    self.assertEqual(status, 200)
+                    self.assertEqual(json.loads(body), {'path': '/parent_path/' + USER + '/auto/',
+                                                        'agent': 'life-ci'})
         for path in ('/legacy_path/not-a-uuid/', '/admin_path/' + USER + '/auto/'):
             self.assertEqual(self.get(path)[0], 404)
 

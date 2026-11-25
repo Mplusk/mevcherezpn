@@ -52,6 +52,17 @@ class SiteTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 backup_block({**routes, key: invalid})
 
+    def test_existing_site_alias_survives_updates(self):
+        routes = {'version': 1, 'host': 'node.example.test', 'parent_host': 'parent.example.test',
+                  'parent_path': 'parent_path', 'aliases': ['parent_path', 'legacy_path']}
+        grouped = self.original.replace('\ngamelife.shop {',
+                                        '\nnode.example.test, old.example.test {', 1)
+        result = transform(grouped, self.html, routes)
+        self.assertIn('\nnode.example.test, old.example.test {', result)
+        self.assertEqual(result.count('log vpn {'), 1)
+        self.assertIn('uri replace /legacy_path/ /parent_path/ 1', result)
+        self.assertEqual(transform(result, self.html, routes), result)
+
     @unittest.skipUnless(hasattr(os, 'geteuid'), 'installer runs on Linux')
     def test_failed_health_check_restores_live_config(self):
         with tempfile.TemporaryDirectory() as temp:
