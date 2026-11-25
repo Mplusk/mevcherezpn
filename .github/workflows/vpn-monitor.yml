@@ -1,0 +1,69 @@
+name: VPN external monitor
+on:
+  schedule:
+    - cron: '13,28,43,58 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_email:
+        description: Send a clearly marked test email after the real checks
+        type: boolean
+        required: false
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: vpn-external-monitor
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Restore previous non-secret status
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/vpn-monitor-state/state.json
+          key: vpn-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: vpn-monitor-state-
+      - name: Fetch verified Xray
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/xray-linux.zip"
+          curl -fsSL --retry 3 https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-64.zip -o "$archive"
+          echo 'b651f7e1d9966ee2c1b1ee1bf8b52c72771824d3065dce96bbc8bcc19ed95f82  '"$archive" | sha256sum -c -
+          unzip -q "$archive" xray -d "$RUNNER_TEMP/xray"
+          chmod 700 "$RUNNER_TEMP/xray/xray"
+      - name: Check subscriptions and independent VPN tunnels
+        env:
+          MONITOR_PROFILE_JSON: ${{ secrets.MONITOR_PROFILE_JSON }}
+          MONITOR_SUBSCRIPTION_URL: ${{ secrets.MONITOR_SUBSCRIPTION_URL }}
+          XRAY_BIN: ${{ runner.temp }}/xray/xray
+          MONITOR_RESULT_FILE: ${{ runner.temp }}/vpn-monitor-result.json
+        run: python3 deploy/monitor/vpn_monitor.py
+      - name: Email status changes
+        id: alerts
+        if: always()
+        env:
+          MONITOR_RESULT_FILE: ${{ runner.temp }}/vpn-monitor-result.json
+          MONITOR_STATE_FILE: ${{ runner.temp }}/vpn-monitor-state/state.json
+          MONITOR_SMTP_USERNAME: ${{ secrets.MONITOR_SMTP_USERNAME }}
+          MONITOR_SMTP_PASSWORD: ${{ secrets.MONITOR_SMTP_PASSWORD }}
+          MONITOR_ALERT_TO: ${{ secrets.MONITOR_ALERT_TO }}
+          MONITOR_TEST_EMAIL: ${{ inputs.test_email || 'false' }}
+        run: python3 deploy/monitor/alerts.py
+      - name: Check whether there is a prior state to save
+        id: state_ready
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/vpn-monitor-state/state.json"; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save non-secret status
+        if: always() && steps.alerts.outcome == 'success' && steps.state_ready.outputs.exists == 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/vpn-monitor-state/state.json
+          key: vpn-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}
