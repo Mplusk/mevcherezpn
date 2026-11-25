@@ -33,13 +33,6 @@ if [[ ! -e "$envfile" ]]; then
 fi
 compose=(docker compose --parallel 1 --env-file "$envfile")
 panel_files=(-f compose.panel.yaml)
-gateway_network="$(awk -F= '$1 == "CADDY_NETWORK" {print $2}' "$envfile" | tail -n 1)"
-if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-    echo 'Invalid Caddy network name'
-    exit 1
-fi
-source "$release/deploy/ru_assets/parent_overlay.sh"
-configure_parent_ru_assets
 # Use a stable bind-mount location across releases. Changing the patch hash
 # recreates the panel; unrelated releases do not restart it.
 patch_dir="$root/hiddify-patches"
@@ -52,6 +45,11 @@ for patch_file in "${patch_files[@]}"; do
 done
 export VPN_HIDDIFY_PATCH_DIR="$patch_dir"
 export VPN_HIDDIFY_PATCH_SHA="$(for patch_file in "${patch_files[@]}"; do sha256sum "$patch_dir/$patch_file" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
+gateway_network="$(awk -F= '$1 == "CADDY_NETWORK" {print $2}' "$envfile" | tail -n 1)"
+if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo 'Invalid Caddy network name'
+    exit 1
+fi
 standalone_gateway="$(awk -F= '$1 == "VPN_STANDALONE_GATEWAY" {print $2}' "$envfile" | tail -n 1)"
 if [[ -n "$standalone_gateway" && "$standalone_gateway" != 1 ]]; then
     echo 'Invalid standalone gateway setting'
