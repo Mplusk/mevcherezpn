@@ -92,14 +92,23 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Test node timestamp correction
+        run: python3 -m unittest discover -s deploy/hiddify -p 'test_*.py' -v
       - name: Boot isolated Hiddify and check TLS
         run: |
           export PANEL_DB_PASSWORD="$(openssl rand -hex 24)"
           export PANEL_REDIS_PASSWORD="$(openssl rand -hex 24)"
           export CADDY_NETWORK=vpn-ci-proxy
+          test_home="$(realpath "$RUNNER_TEMP")/vpn-release-test"
+          test_root="$test_home/services/gamelife-vpn"
+          export VPN_HIDDIFY_PATCH_DIR="$test_root/hiddify-patches"
+          mkdir -p "$VPN_HIDDIFY_PATCH_DIR"
+          cp deploy/hiddify/fix_node_timestamps.py "$VPN_HIDDIFY_PATCH_DIR/"
+          export VPN_HIDDIFY_PATCH_SHA="$(sha256sum "$VPN_HIDDIFY_PATCH_DIR/fix_node_timestamps.py" | awk '{print $1}')"
           docker network create "$CADDY_NETWORK"
           docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
+          docker exec gamelife-hiddify-panel-1 /opt/hiddify-manager/.venv313/bin/python /usr/local/lib/gamelife-hiddify/fix_node_timestamps.py
           docker exec gamelife-hiddify-panel-1 grep -Fxq '        add_task "Warp" install_run services/warp false' /opt/hiddify-manager/scripts/install.sh
           docker restart gamelife-hiddify-panel-1 >/dev/null
           panel_restart_count="$(docker inspect gamelife-hiddify-panel-1 --format '{{.RestartCount}}')"
@@ -115,8 +124,6 @@ jobs:
           sleep 15
           test "$panel_restart_count" = "$(docker inspect gamelife-hiddify-panel-1 --format '{{.RestartCount}}')"
           bash -n deploy/release.sh
-          test_home="$(realpath "$RUNNER_TEMP")/vpn-release-test"
-          test_root="$test_home/services/gamelife-vpn"
           test_release="$test_root/releases/$GITHUB_SHA"
           mkdir -p "$test_release"
           git archive "$GITHUB_SHA" | tar -xf - -C "$test_release"

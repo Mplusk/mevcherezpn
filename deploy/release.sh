@@ -33,6 +33,15 @@ if [[ ! -e "$envfile" ]]; then
 fi
 compose=(docker compose --parallel 1 --env-file "$envfile")
 panel_files=(-f compose.panel.yaml)
+# Use a stable bind-mount location across releases. Changing the patch hash
+# recreates the panel; unrelated releases do not restart it.
+patch_dir="$root/hiddify-patches"
+mkdir -p "$patch_dir"
+patch_tmp="$(mktemp "$patch_dir/.fix_node_timestamps.XXXXXX")"
+install -m 600 deploy/hiddify/fix_node_timestamps.py "$patch_tmp"
+mv -f "$patch_tmp" "$patch_dir/fix_node_timestamps.py"
+export VPN_HIDDIFY_PATCH_DIR="$patch_dir"
+export VPN_HIDDIFY_PATCH_SHA="$(sha256sum "$patch_dir/fix_node_timestamps.py" | awk '{print $1}')"
 gateway_network="$(awk -F= '$1 == "CADDY_NETWORK" {print $2}' "$envfile" | tail -n 1)"
 if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     echo 'Invalid Caddy network name'

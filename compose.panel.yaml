@@ -14,6 +14,7 @@ services:
         fi
         source /opt/hiddify-manager/.venv313/bin/activate
         python -c 'import importlib.util as i; assert i.find_spec("hiddifypanel")'
+        python /usr/local/lib/gamelife-hiddify/fix_node_timestamps.py
         sed '/^uv pip install -e services\/panel\/src *$$/d' /opt/hiddify-manager/scripts/docker-init.sh > /tmp/gamelife-hiddify-init.sh
         recursive_chown="$$(grep -Fxc 'chown -R hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
         single_chown="$$(grep -Fxc 'chown hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
@@ -46,6 +47,7 @@ services:
       UV_OFFLINE: "1"
       HIDDIFY_NO_HTTP_API: "true"
       VPN_DISABLE_WARP: ${VPN_DISABLE_WARP:-true}
+      VPN_HIDDIFY_PATCH_SHA: ${VPN_HIDDIFY_PATCH_SHA:-development}
       MYSQL_DATABASE: hiddifypanel
       MYSQL_USER: hiddifypanel
       MYSQL_PASSWORD: ${PANEL_DB_PASSWORD:?generate a hex password}
@@ -54,6 +56,7 @@ services:
       REDIS_URI_MAIN: redis://:${PANEL_REDIS_PASSWORD}@redis:6379/1
     volumes:
       - panel:/opt/hiddify-manager/data
+      - ${VPN_HIDDIFY_PATCH_DIR:-./deploy/hiddify}:/usr/local/lib/gamelife-hiddify:ro
     ports:
       - "127.0.0.1:${PANEL_HTTPS_PORT:-28443}:443"
     networks:
