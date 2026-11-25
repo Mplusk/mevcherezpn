@@ -3,6 +3,18 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  life:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Test the simulation and safe gateway rendering
+        env:
+          LIFE_DOCKER_TESTS: '1'
+        run: |
+          node --test deploy/life/life.test.js
+          python3 -m unittest discover -s deploy/life -p 'test_*.py' -v
   backup_relay:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -123,6 +135,9 @@ jobs:
             sleep 2
           done
           test "$ready" = yes
-          curl --fail --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 https://gamelife.shop:18443/ | grep -Fq 'GameLife VPN'
+          curl --fail --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 https://gamelife.shop:18443/ -o "$RUNNER_TEMP/life.html"
+          grep -Fq 'id="world"' "$RUNNER_TEMP/life.html"
+          curl --fail --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 https://gamelife.shop:18443/rules -o "$RUNNER_TEMP/life-rules.html"
+          grep -Fq 'id="world"' "$RUNNER_TEMP/life-rules.html"
           test "$(curl --silent --insecure --noproxy '*' --resolve gamelife.shop:18443:127.0.0.1 -H 'X-GameLife-Decoy-Loop: 1' -o /dev/null -w '%{http_code}' https://gamelife.shop:18443/unknown)" = 404
           docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' $(docker compose -f compose.panel.yaml ps -q)
