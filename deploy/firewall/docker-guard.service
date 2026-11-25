@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict public Docker forwarding to the web gateway
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/gamelife-docker-guard
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target docker.service
