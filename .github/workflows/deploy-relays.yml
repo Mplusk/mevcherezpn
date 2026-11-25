@@ -55,6 +55,16 @@ jobs:
           [[ "$main_sha" == "$DEPLOY_SHA" ]] || { echo 'Main has a newer revision'; exit 1; }
           count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$DEPLOY_SHA&event=push&status=success&per_page=1" --jq .total_count)"
           [[ "$count" -ge 1 ]] || { echo 'The revision has not passed Verify'; exit 1; }
+      - name: Wait for the panel deployment before checking relays
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          python3 deploy/relay/wait_for_panel.py
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$main_sha" == "$DEPLOY_SHA" ]] || { echo 'Main has a newer revision'; exit 1; }
       - name: Deploy verified relay
         env:
           DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
