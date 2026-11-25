@@ -37,6 +37,36 @@ jobs:
         env:
           RELAY_DOCKER_TESTS: '1'
         run: python3 -m unittest discover -s deploy/relay/tests -p 'test_*.py' -v
+  hiddify_client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Test automatic selection using Hiddify 4 and 5 cores
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --ignore-installed --require-hashes --only-binary=:all: -r deploy/hiddify/ci-requirements.txt
+          for version in v4.1.0 v5.9.15; do
+            archive="$RUNNER_TEMP/hiddify-$version.tar.gz"
+            curl --fail --silent --show-error --location --retry 3 "https://github.com/hiddify/hiddify-core/releases/download/$version/hiddify-core-linux-amd64.tar.gz" -o "$archive"
+            if [[ "$version" == v4.1.0 ]]; then
+              checksum=79f55725b9c1c0b3cad46a45ededb3c5be83d7a6236cc1dfa9bd78fb3c687e6f
+            else
+              checksum=7793498bc9b86e58704a86f5517c5acceb4d907fd42cc30c80cd12ed8e9fa535
+            fi
+            echo "$checksum  $archive" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/hiddify-$version"
+            tar -xzf "$archive" -C "$RUNNER_TEMP/hiddify-$version" --strip-components=1
+          done
+          export HIDDIFY_CORE_V4="$RUNNER_TEMP/hiddify-v4.1.0/hiddify-core"
+          export HIDDIFY_CORE_V5="$RUNNER_TEMP/hiddify-v5.9.15/hiddify-core"
+          export REQUIRE_HIDDIFY_CORE_TESTS=1
+          python -m unittest discover -s deploy/hiddify -p 'test_*.py' -v
   secret_scan:
     runs-on: ubuntu-latest
     steps:
@@ -103,12 +133,14 @@ jobs:
           test_root="$test_home/services/gamelife-vpn"
           export VPN_HIDDIFY_PATCH_DIR="$test_root/hiddify-patches"
           mkdir -p "$VPN_HIDDIFY_PATCH_DIR"
-          cp deploy/hiddify/fix_node_timestamps.py "$VPN_HIDDIFY_PATCH_DIR/"
-          export VPN_HIDDIFY_PATCH_SHA="$(sha256sum "$VPN_HIDDIFY_PATCH_DIR/fix_node_timestamps.py" | awk '{print $1}')"
+          patch_files=(fix_node_timestamps.py auto_profile.py install_auto_profile.py)
+          for patch_file in "${patch_files[@]}"; do cp "deploy/hiddify/$patch_file" "$VPN_HIDDIFY_PATCH_DIR/"; done
+          export VPN_HIDDIFY_PATCH_SHA="$(for patch_file in "${patch_files[@]}"; do sha256sum "$VPN_HIDDIFY_PATCH_DIR/$patch_file" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
           docker network create "$CADDY_NETWORK"
           docker compose -f compose.panel.yaml up -d --wait --wait-timeout 600
           openssl s_client -connect 127.0.0.1:28443 -servername gamelife.shop </dev/null 2>/dev/null | openssl x509 -noout
           docker exec gamelife-hiddify-panel-1 /opt/hiddify-manager/.venv313/bin/python /usr/local/lib/gamelife-hiddify/fix_node_timestamps.py
+          docker exec gamelife-hiddify-panel-1 /opt/hiddify-manager/.venv313/bin/python /usr/local/lib/gamelife-hiddify/install_auto_profile.py
           docker exec gamelife-hiddify-panel-1 grep -Fxq '        add_task "Warp" install_run services/warp false' /opt/hiddify-manager/scripts/install.sh
           docker restart gamelife-hiddify-panel-1 >/dev/null
           panel_restart_count="$(docker inspect gamelife-hiddify-panel-1 --format '{{.RestartCount}}')"

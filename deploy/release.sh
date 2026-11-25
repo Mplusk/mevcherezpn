@@ -37,11 +37,14 @@ panel_files=(-f compose.panel.yaml)
 # recreates the panel; unrelated releases do not restart it.
 patch_dir="$root/hiddify-patches"
 mkdir -p "$patch_dir"
-patch_tmp="$(mktemp "$patch_dir/.fix_node_timestamps.XXXXXX")"
-install -m 600 deploy/hiddify/fix_node_timestamps.py "$patch_tmp"
-mv -f "$patch_tmp" "$patch_dir/fix_node_timestamps.py"
+patch_files=(fix_node_timestamps.py auto_profile.py install_auto_profile.py)
+for patch_file in "${patch_files[@]}"; do
+    patch_tmp="$(mktemp "$patch_dir/.hiddify-patch.XXXXXX")"
+    install -m 600 "deploy/hiddify/$patch_file" "$patch_tmp"
+    mv -f "$patch_tmp" "$patch_dir/$patch_file"
+done
 export VPN_HIDDIFY_PATCH_DIR="$patch_dir"
-export VPN_HIDDIFY_PATCH_SHA="$(sha256sum "$patch_dir/fix_node_timestamps.py" | awk '{print $1}')"
+export VPN_HIDDIFY_PATCH_SHA="$(for patch_file in "${patch_files[@]}"; do sha256sum "$patch_dir/$patch_file" | awk '{print $1}'; done | sha256sum | awk '{print $1}')"
 gateway_network="$(awk -F= '$1 == "CADDY_NETWORK" {print $2}' "$envfile" | tail -n 1)"
 if [[ -n "$gateway_network" && ! "$gateway_network" =~ ^[A-Za-z0-9_.-]+$ ]]; then
     echo 'Invalid Caddy network name'

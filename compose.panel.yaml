@@ -15,6 +15,7 @@ services:
         source /opt/hiddify-manager/.venv313/bin/activate
         python -c 'import importlib.util as i; assert i.find_spec("hiddifypanel")'
         python /usr/local/lib/gamelife-hiddify/fix_node_timestamps.py
+        python /usr/local/lib/gamelife-hiddify/install_auto_profile.py
         sed '/^uv pip install -e services\/panel\/src *$$/d' /opt/hiddify-manager/scripts/docker-init.sh > /tmp/gamelife-hiddify-init.sh
         recursive_chown="$$(grep -Fxc 'chown -R hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
         single_chown="$$(grep -Fxc 'chown hiddify-panel:hiddify-panel "$$PANEL_DIR" >/dev/null 2>&1' /opt/hiddify-manager/services/panel/run.sh || true)"
