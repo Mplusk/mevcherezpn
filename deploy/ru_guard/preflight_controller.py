@@ -14,13 +14,19 @@ import sys
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / 'ru_assets'
-KEY = Path(os.environ['LOCALAPPDATA']) / 'Temp/gamelife-vpn-deploy-efa7e9c4fc754433a3f1541b41f29813/deploy_ed25519'
 HOSTS = {'main': '132.243.234.163', 'de': '2.27.75.91',
          'pl': '191.217.211.240', 'nl': '153.52.155.69'}
 MODULES = [('reduce', ASSETS), ('sync', ASSETS), ('installer', ASSETS), ('node_install', ASSETS),
            ('patch', ROOT), ('template_install', ROOT), ('outbound_install', ROOT), ('journal', ROOT),
            ('transaction', ROOT), ('apply_monitor', ROOT), ('verify_generated', ROOT),
            ('remote_agent', ROOT), ('node_operator', ROOT), ('outbound_agent', ROOT)]
+
+
+def key_path():
+    appdata = os.environ.get('LOCALAPPDATA')
+    if not appdata:
+        raise ValueError('Windows deployment key location unavailable')
+    return Path(appdata) / 'Temp/gamelife-vpn-deploy-efa7e9c4fc754433a3f1541b41f29813/deploy_ed25519'
 
 
 def read_sources():
@@ -83,7 +89,7 @@ def main():
     if len(sys.argv) < 2 or any(node not in HOSTS for node in sys.argv[1:]):
         raise ValueError('choose known nodes')
     for node in sys.argv[1:]:
-        process = subprocess.run(['ssh', '-T', '-i', str(KEY), '-o', 'BatchMode=yes',
+        process = subprocess.run(['ssh', '-T', '-i', str(key_path()), '-o', 'BatchMode=yes',
                                   '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes',
                                   '-o', 'IdentityAgent=none',

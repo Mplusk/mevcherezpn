@@ -35,7 +35,7 @@ def main():
     command = ('docker run --rm -i --pull=never --network none --read-only '
                '--tmpfs /tmp:rw,nosuid,nodev --memory 384m --cpus 0.5 --pids-limit 96 '
                '-e PYTHONDONTWRITEBYTECODE=1 --entrypoint python3 ' + IMAGE + ' -')
-    result = subprocess.run(['ssh', '-T', '-i', str(wire.KEY), '-o', 'BatchMode=yes',
+    result = subprocess.run(['ssh', '-T', '-i', str(wire.key_path()), '-o', 'BatchMode=yes',
                              '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
                              '-o', 'ForwardAgent=no', '-o', 'IdentityAgent=none',
                              '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=15',

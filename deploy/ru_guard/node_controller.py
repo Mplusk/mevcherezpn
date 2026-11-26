@@ -25,7 +25,7 @@ def main():
         raise ValueError('source bundle changed')
     payload = wire.program(node, action, tx, sources=sources)
     try:
-        process = subprocess.run(['ssh', '-T', '-i', str(wire.KEY), '-o', 'BatchMode=yes',
+        process = subprocess.run(['ssh', '-T', '-i', str(wire.key_path()), '-o', 'BatchMode=yes',
                                   '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ForwardAgent=no', '-o', 'ClearAllForwardings=yes',
                                   '-o', 'IdentityAgent=none',
