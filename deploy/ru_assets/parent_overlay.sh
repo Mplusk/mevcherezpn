@@ -2,7 +2,7 @@
 # Source from release.sh after root/release/gateway_network/panel_files are set.
 # Only the exact root-owned opt-in can change the panel Compose files.
 configure_parent_ru_assets() {
-    local status=0 mount_list existing
+    local status=0 mount_list existing stable_overlay
     python3 "$release/deploy/ru_assets/opt_in.py" "$root/ru-assets" || status=$?
     case "$status" in
         0)
@@ -16,7 +16,17 @@ configure_parent_ru_assets() {
             fi
             export VPN_RU_ASSET_ROOT="$root/ru-assets"
             export CADDY_NETWORK="$gateway_network"
-            panel_files+=(-f "$release/deploy/ru_assets/compose.ru-assets.yaml")
+            stable_overlay="$root/ru-assets/compose.ru-assets.yaml"
+            if [[ -e "$stable_overlay" || -L "$stable_overlay" ]]; then
+                if [[ ! -f "$stable_overlay" || -L "$stable_overlay" || "$(stat -c '%u:%a:%h' "$stable_overlay")" != '0:600:1' ]] ||
+                   ! cmp -s "$stable_overlay" "$release/deploy/ru_assets/compose.ru-assets.yaml"; then
+                    echo 'Stable routing overlay differs or is unsafe' >&2
+                    return 1
+                fi
+                panel_files+=(-f "$stable_overlay")
+            else
+                panel_files+=(-f "$release/deploy/ru_assets/compose.ru-assets.yaml")
+            fi
             ;;
         3)
             # Deleting the marker must never silently detach a mount that an

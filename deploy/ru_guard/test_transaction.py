@@ -1,11 +1,14 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+import json
 
 from outbound_install import marked
 from test_outbound_install import Panel as OutboundPanel
 from test_template_install import Panel as TemplatePanel, fixture as template_fixture
 from transaction import RollbackIncomplete, TransactionError, run
+from journal import Journal, JournalError
 
 NODES = ('main', 'nl', 'de', 'pl')
 
@@ -90,6 +93,8 @@ class TransactionTests(unittest.TestCase):
             self.assertTrue((folder / 'outbound.json').is_file())
             self.assertTrue(marked(panel.outbounds.rows)['enabled'])
             self.assertNotIn('rollback_mounts', driver.events)
+            second_panel = Panel()
+            self.assertTrue(run(second_panel, Driver(second_panel), NODES, d).is_dir())
 
     def test_preflight_failure_has_no_writes(self):
         panel = Panel()
@@ -176,6 +181,61 @@ class TransactionTests(unittest.TestCase):
             with self.assertRaises(TransactionError):
                 run(panel, driver, NODES, d)
         self.assertNotIn('prepare_mounts', driver.events)
+
+    def test_process_interruption_is_detected_before_new_writes(self):
+        panel = Panel()
+        driver = Driver(panel)
+        def crash():
+            driver.events.append('prepare_mounts')
+            raise SystemExit('simulated interruption')
+        driver.prepare_mounts = crash
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(SystemExit):
+                run(panel, driver, NODES, d)
+            journals = list(Path(d).glob('route-*/journal.json'))
+            self.assertEqual(len(journals), 1)
+            record = json.loads(journals[0].read_text())
+            self.assertEqual(record['status'], 'running')
+            self.assertEqual(record['nodes'], list(NODES))
+            self.assertEqual(record['events'][-1], {'phase': 'prepare-mounts', 'event': 'intent'})
+            self.assertNotIn('rollback_mounts', driver.events)
+            other_panel = Panel()
+            other_driver = Driver(other_panel)
+            with self.assertRaises(RollbackIncomplete):
+                run(other_panel, other_driver, NODES, d)
+            self.assertEqual(other_driver.events, [])
+
+    def test_journal_failure_after_mount_never_removes_mount(self):
+        panel = Panel()
+        driver = Driver(panel)
+        real_write = Journal.write
+        calls = 0
+        def fail_after_operation(journal):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                raise JournalError('simulated disk failure')
+            return real_write(journal)
+        with tempfile.TemporaryDirectory() as d, patch.object(Journal, 'write', fail_after_operation):
+            with self.assertRaises(RollbackIncomplete):
+                run(panel, driver, NODES, d)
+            self.assertIn('prepare_mounts', driver.events)
+            self.assertNotIn('rollback_mounts', driver.events)
+
+    def test_broken_or_missing_journal_fails_closed(self):
+        for contents in (None, '{bad', '{"version":1,"status":"running"}',
+                         '{"version":1,"status":"complete","events":[]}',
+                         '{"version":1,"status":"rolled_back","events":[]}'):
+            panel = Panel()
+            driver = Driver(panel)
+            with self.subTest(contents=contents), tempfile.TemporaryDirectory() as d:
+                unfinished = Path(d) / 'route-abandoned'
+                unfinished.mkdir()
+                if contents is not None:
+                    (unfinished / 'journal.json').write_text(contents)
+                with self.assertRaises(RollbackIncomplete):
+                    run(panel, driver, NODES, d)
+                self.assertEqual(driver.events, [])
 
 
 if __name__ == '__main__':

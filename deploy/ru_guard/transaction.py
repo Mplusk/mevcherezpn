@@ -11,6 +11,7 @@ import tempfile
 
 import outbound_install
 import template_install
+from journal import Journal, JournalError, RootLock, sync_directory, unfinished
 
 
 class TransactionError(RuntimeError):
@@ -71,11 +72,13 @@ def run(panel, driver, nodes, backup_root):
     info = root.lstat()
     if not root.is_dir() or root.is_symlink() or (os.name != 'nt' and (info.st_uid != 0 or info.st_mode & 0o077)):
         raise TransactionError('unsafe backup directory')
-    directory = Path(tempfile.mkdtemp(prefix='route-', dir=root))
-    templates_backups = {node: directory / f'templates-{index}.json'
-                         for index, node in enumerate(nodes)}
-    outbound_backup = directory / 'outbound.json'
-    rollback_backup = directory / 'outbound-rollback.json'
+    with RootLock(root):
+        if unfinished(root):
+            raise RollbackIncomplete('unfinished journal requires manual recovery; do not remove mounts')
+        return _run_locked(panel, driver, nodes, root)
+
+
+def _run_locked(panel, driver, nodes, root):
 
     # Validate every dependency before the first change, including a healthy
     # original data plane; existing user overrides cause prepare() to fail.
@@ -92,49 +95,74 @@ def run(panel, driver, nodes, backup_root):
                    for row in prepared[node]) for node in nodes):
             raise TransactionError('active exception with unprepared node templates')
     require_nodes(driver.preflight(), nodes, ('host_verified', 'version_pinned', 'baseline_healthy'))
-    mount_attempted = False
-    panel_attempted = False
-    try:
-        mount_attempted = True
-        driver.prepare_mounts()
-        require_nodes(driver.verify_mounts(), nodes,
-                      ('host_verified', 'version_pinned', 'mount_persistent',
-                       'assets_valid', 'xray_valid', 'singbox_valid'))
-        panel_attempted = True
-        # Each child maintains its own template database; ordinary outbound
-        # synchronization does not copy parent template overrides.
-        for node in nodes:
-            template_install.install(panels[node], templates_backups[node])
-        require_nodes(driver.apply(), nodes, ('applied',))
-        require_nodes(driver.verify_baseline(), nodes, ('baseline_restored', 'vpn_healthy'))
+    directory = Path(tempfile.mkdtemp(prefix='route-', dir=root))
+    sync_directory(root)
+    journal = Journal(directory, nodes)
+    templates_backups = {node: directory / f'templates-{index}.json'
+                         for index, node in enumerate(nodes)}
+    outbound_backup = directory / 'outbound.json'
+    rollback_backup = directory / 'outbound-rollback.json'
+
+    def checked(phase, callback, fields):
+        def action():
+            require_nodes(callback(), nodes, fields)
+        return journal.perform(phase, action)
+
+    def check_templates():
         for node in nodes:
             rows = template_install.prepare(panels[node].get_templates())
             if any(row['content'] != row['updated'] or not row['builtin_override'] for row in rows):
                 raise TransactionError('node template readback failed')
-        outbound_install.install(panel, outbound_backup)
-        require_nodes(driver.apply(), nodes, ('applied',))
-        require_nodes(driver.verify_sync(), nodes, ('guard_active', 'exception_active'))
-        require_nodes(driver.verify_new(), nodes,
-                      ('vpn_healthy', 'blocked_via_vpn', 'ru_guarded',
-                       'private_guarded', 'torrent_guarded'))
+
+    def check_subscription():
         if driver.verify_subscription() is not True:
             raise TransactionError('subscription verification failed')
+
+    mount_attempted = False
+    panel_attempted = False
+    try:
+        mount_attempted = True
+        journal.perform('prepare-mounts', driver.prepare_mounts)
+        checked('verify-mounts', driver.verify_mounts,
+                ('host_verified', 'version_pinned', 'mount_persistent',
+                 'assets_valid', 'xray_valid', 'singbox_valid'))
+        panel_attempted = True
+        # Each child maintains its own template database; ordinary outbound
+        # synchronization does not copy parent template overrides.
+        for index, node in enumerate(nodes):
+            journal.perform(f'templates-{index}', lambda node=node: template_install.install(panels[node], templates_backups[node]))
+        checked('stage-apply', driver.apply, ('applied',))
+        checked('stage-baseline', driver.verify_baseline, ('baseline_restored', 'vpn_healthy'))
+        journal.perform('templates-readback', check_templates)
+        journal.perform('install-outbound', lambda: outbound_install.install(panel, outbound_backup))
+        checked('final-apply', driver.apply, ('applied',))
+        checked('verify-sync', driver.verify_sync, ('guard_active', 'exception_active'))
+        checked('verify-new', driver.verify_new,
+                ('vpn_healthy', 'blocked_via_vpn', 'ru_guarded', 'private_guarded', 'torrent_guarded'))
+        journal.perform('verify-subscription', check_subscription)
+        journal.finish('complete')
         return directory
+    except JournalError as error:
+        # Without a durable record, further mutations are unsafe. Recovery must
+        # inspect every host; deliberately do not attempt to remove any mount.
+        raise RollbackIncomplete('journal failure; retain mounts and inspect state') from error
     except Exception as error:
         try:
             if panel_attempted:
                 # Preserve an exception that was already active before this run.
                 if not old_exception or not old_exception.get('enabled'):
-                    outbound_install.remove(panel, rollback_backup)
-                for node in reversed(nodes):
-                    restore_templates(panels[node], templates_backups[node])
-                require_nodes(driver.apply(), nodes, ('applied',))
-                require_nodes(driver.verify_baseline(), nodes, ('baseline_restored', 'vpn_healthy'))
+                    journal.perform('rollback-outbound', lambda: outbound_install.remove(panel, rollback_backup))
+                for index in reversed(range(len(nodes))):
+                    node = nodes[index]
+                    journal.perform(f'rollback-templates-{index}', lambda node=node: restore_templates(panels[node], templates_backups[node]))
+                checked('rollback-apply', driver.apply, ('applied',))
+                checked('rollback-baseline', driver.verify_baseline, ('baseline_restored', 'vpn_healthy'))
             elif mount_attempted:
-                require_nodes(driver.verify_baseline(), nodes, ('baseline_restored', 'vpn_healthy'))
+                checked('rollback-baseline', driver.verify_baseline, ('baseline_restored', 'vpn_healthy'))
             if mount_attempted:
-                driver.rollback_mounts()
-                require_nodes(driver.verify_baseline(), nodes, ('baseline_restored', 'vpn_healthy'))
+                journal.perform('rollback-mounts', driver.rollback_mounts)
+                checked('rollback-final', driver.verify_baseline, ('baseline_restored', 'vpn_healthy'))
+            journal.finish('rolled_back')
         except Exception as rollback:
             raise RollbackIncomplete('rollback unverified; inspect mount state and backups') from rollback
         raise TransactionError('transaction failed and prior state was restored') from error

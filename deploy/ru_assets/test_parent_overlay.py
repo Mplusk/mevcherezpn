@@ -65,6 +65,7 @@ configure_parent_ru_assets
 printf 'COUNT=%s\n' "${#panel_files[@]}"
 printf 'ASSET=%s\n' "${VPN_RU_ASSET_ROOT-unset}"
 printf 'GATEWAY=%s\n' "${CADDY_NETWORK-unset}"
+printf 'OVERLAY=%s\n' "${panel_files[3]-none}"
 '''
         env = {'PATH': '/usr/bin:/bin', 'BASH_ENV': str(self.bash_env),
                'FAKE_DOCKER': state, 'LANG': 'C.UTF-8'}
@@ -91,6 +92,25 @@ printf 'GATEWAY=%s\n' "${CADDY_NETWORK-unset}"
         result = self.run_hook(state='mounted')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('marker missing', result.stderr)
+
+    def test_stable_overlay_is_reused_and_drift_fails_closed(self):
+        root = self.make_valid_assets()
+        marker = root / MARKER
+        marker.write_bytes(b'v1\n'); marker.chmod(0o600)
+        stable = root / 'compose.ru-assets.yaml'
+        stable.write_bytes((SOURCE / 'compose.ru-assets.yaml').read_bytes())
+        stable.chmod(0o600)
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('OVERLAY=' + str(stable), result.stdout)
+        stable.write_text('different overlay')
+        self.assertNotEqual(self.run_hook().returncode, 0)
+        stable.write_bytes((SOURCE / 'compose.ru-assets.yaml').read_bytes())
+        stable.chmod(0o644)
+        self.assertNotEqual(self.run_hook().returncode, 0)
+        stable.unlink()
+        stable.symlink_to(SOURCE / 'compose.ru-assets.yaml')
+        self.assertNotEqual(self.run_hook().returncode, 0)
 
     def test_inspection_failure_is_not_assumed_safe(self):
         for state in ('error', 'exists'):
