@@ -18,7 +18,7 @@ PROFILE = {
     "Geoipurl": "https://nl.gamelife.shop/assets/geodata/geoip.dat",
     "Geositeurl": "https://nl.gamelife.shop/assets/geodata/geosite.dat",
     "DnsHosts": {"cloudflare-dns.com": "1.1.1.1", "dns.google": "8.8.8.8"},
-    "DirectSites": ["geosite:category-ru", "geosite:ru-available-only-inside", "geosite:private"],
+    "DirectSites": ["domain:2ip.io", "geosite:category-ru", "geosite:ru-available-only-inside", "geosite:private"],
     "DirectIp": ["geoip:ru", "geoip:private"],
     "ProxySites": ["geosite:ru-blocked"],
     "ProxyIp": ["geoip:ru-blocked"],

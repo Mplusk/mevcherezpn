@@ -138,7 +138,7 @@ class XrayRoutingTests(unittest.TestCase):
                 with socket.socket() as s:
                     s.bind(('127.0.0.1', 0))
                     port = s.getsockname()[1]
-                dns = {'hosts': {name: '127.0.0.1' for name in ('blocked.test', 'russian.test', 'other.test')}}
+                dns = {'hosts': {name: '127.0.0.1' for name in ('blocked.test', 'russian.test', 'other.test', '2ip.io')}}
                 dns['hosts']['private-blocked.test'] = '198.18.0.9'
                 dns['hosts']['ipblocked.test'] = '203.0.113.5'
                 inbound = {'listen': '127.0.0.1', 'port': port, 'protocol': 'socks',
@@ -158,7 +158,7 @@ class XrayRoutingTests(unittest.TestCase):
                 client_rules = [
                     {'type': 'field', 'domain': ['geosite:ru-blocked'], 'outboundTag': 'proxy'},
                     {'type': 'field', 'ip': ['geoip:ru-blocked'], 'outboundTag': 'proxy'},
-                    {'type': 'field', 'domain': ['geosite:category-ru'], 'outboundTag': 'direct'},
+                    {'type': 'field', 'domain': ['domain:2ip.io', 'geosite:category-ru'], 'outboundTag': 'direct'},
                 ]
                 guard_rules = [dict(rule) for rule in server_rules]
                 guard_rules[2]['outboundTag'] = 'proxy'
@@ -167,7 +167,7 @@ class XrayRoutingTests(unittest.TestCase):
                     ('server', server_rules, [direct, block, proxy],
                      {'blocked.test': 'DIRECT', 'russian.test': 'BLOCKED', 'other.test': 'DIRECT', 'private-blocked.test': 'BLOCKED'}),
                     ('client', client_rules, [proxy, direct, block],
-                     {'blocked.test': 'PROXY', 'russian.test': 'DIRECT', 'other.test': 'PROXY', 'ipblocked.test': 'PROXY'}),
+                     {'blocked.test': 'PROXY', 'russian.test': 'DIRECT', '2ip.io': 'DIRECT', 'other.test': 'PROXY', 'ipblocked.test': 'PROXY'}),
                     ('guard', guard_rules, [direct, block, proxy],
                      {'blocked.test': 'PROXY', 'private-blocked.test': 'BLOCKED', 'ipblocked.test': 'PROXY'}),
                     ('guard-unsafe', guard_rules, [direct, block, proxy],

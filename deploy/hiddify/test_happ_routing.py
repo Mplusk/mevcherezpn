@@ -19,6 +19,7 @@ class HappRoutingTests(unittest.TestCase):
             self.assertEqual(actual["RouteOrder"], "block-proxy-direct")
             self.assertEqual(actual["GlobalProxy"], "true")
             self.assertIn("geosite:category-ru", actual["DirectSites"])
+            self.assertIn("domain:2ip.io", actual["DirectSites"])
             self.assertIn("geosite:ru-blocked", actual["ProxySites"])
             self.assertIn("geoip:ru", actual["DirectIp"])
             self.assertIn("geoip:ru-blocked", actual["ProxyIp"])
