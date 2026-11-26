@@ -102,7 +102,72 @@ def query(port, dest, hostname='blocked.test'):
         return 'BLOCKED'
 
 
+def query_hijacked_dns(port, destination_port=53):
+    """Query a private DNS destination via SOCKS, without reaching real DNS."""
+    request = (b'\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00'
+               b'\x03dns\x04test\x00\x00\x01\x00\x01')
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=4) as sock:
+            sock.settimeout(4)
+            sock.sendall(b'\x05\x01\x00')
+            if readn(sock, 2) != b'\x05\x00':
+                return False
+            sock.sendall(b'\x05\x01\x00\x01\x7f\x00\x00\x01' + struct.pack('!H', destination_port))
+            reply = readn(sock, 4)
+            if reply[1]:
+                return False
+            length = 4 if reply[3] == 1 else 16 if reply[3] == 4 else readn(sock, 1)[0]
+            readn(sock, length + 2)
+            sock.sendall(struct.pack('!H', len(request)) + request)
+            size = struct.unpack('!H', readn(sock, 2))[0]
+            response = readn(sock, size)
+            return len(response) >= 12 and response[:2] == b'\x12\x34' and response[6:8] == b'\x00\x01'
+    except (OSError, EOFError, struct.error):
+        return False
+
+
 class SingGuardTests(unittest.TestCase):
+    def test_private_dns_hijack_precedes_private_guard(self):
+        core = os.environ.get('HIDDIFY_PANEL_CORE')
+        if not core:
+            if os.environ.get('REQUIRE_SING_GUARD_TESTS'):
+                self.fail('HIDDIFY_PANEL_CORE is required')
+            self.skipTest('panel core not supplied')
+        dns = UDPServer(('127.0.0.1', 0), DNS)
+        threading.Thread(target=dns.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory(prefix='sing-dns-guard-') as tmp:
+                for correct_order, destination_port in ((False, 53), (True, 53), (False, 5353), (True, 5353)):
+                    with self.subTest(correct_order=correct_order, destination_port=destination_port):
+                        with socket.socket() as s:
+                            s.bind(('127.0.0.1', 0))
+                            port = s.getsockname()[1]
+                        hijack = [{'port': [53], 'action': 'hijack-dns'},
+                                  {'protocol': 'dns', 'action': 'hijack-dns'}]
+                        guards = [{'action': 'resolve'}, {'ip_is_private': True, 'action': 'reject'}]
+                        rules = [{'action': 'sniff'}] + ((hijack + guards) if correct_order else (guards + hijack))
+                        config = {'log': {'level': 'error'},
+                                  'dns': {'servers': [{'type': 'udp', 'tag': 'dns', 'server': '127.0.0.1',
+                                                       'server_port': dns.server_address[1]}], 'final': 'dns'},
+                                  'inbounds': [{'type': 'socks', 'tag': 'in', 'listen': '127.0.0.1', 'listen_port': port}],
+                                  'outbounds': [{'type': 'direct', 'tag': 'direct'}],
+                                  'route': {'rules': rules, 'final': 'direct'}}
+                        path = Path(tmp) / 'config.json'
+                        path.write_text(json.dumps(config), encoding='utf-8')
+                        proc = subprocess.Popen([core, 'srun', '-c', str(path)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                        try:
+                            time.sleep(1)
+                            if proc.poll() is not None:
+                                self.fail('core did not start: ' + proc.stdout.read().decode(errors='replace'))
+                            self.assertEqual(query_hijacked_dns(port, destination_port), correct_order)
+                        finally:
+                            proc.terminate()
+                            proc.wait(timeout=5)
+                            proc.stdout.close()
+        finally:
+            dns.shutdown()
+            dns.server_close()
+
     def test_resolve_before_private_guard(self):
         core = os.environ.get('HIDDIFY_PANEL_CORE')
         if not core:

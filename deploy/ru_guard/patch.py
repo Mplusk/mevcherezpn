@@ -24,12 +24,31 @@ EARLY_XRAY = '''        {# GameLife: enforce private-address and BitTorrent prot
         {% endif %}
 '''
 SING_BRIDGE = '''    {# Traffic xray sends into a bridge SOCKS inbound (Tor, Psiphon, the admin's outbounds / endpoints) leaves through that outbound #}
+    {% for o in ctx.outbounds.singbox_bridged %}
+    {"inbound": ["in-{{ o.singbox_tag }}"], "outbound": {{ o.singbox_tag|tojson }}},
+    {% endfor %}
 '''
 SING_SNIFF = '''    {"action": "sniff"},
     {% if ctx.hconfig.torrent_block %}
     {# Settings > General: Block BitTorrent (the sniffer above recognizes its handshake, whatever the port) #}
     {"protocol": ["bittorrent"], "action": "reject", "method": "default"},
     {% endif %}
+'''
+SING_DNS = '''    {
+      "action": "hijack-dns",
+      "port": [53]
+    },
+    {
+      "action": "hijack-dns",
+      "protocol": "dns"
+    },
+'''
+SING_QUIC = '''    {
+      "protocol": "quic",
+      "port": [443],
+      "action": "reject",
+      "method": "default"
+    },
 '''
 SING_REMOTE = '''      "type": "remote",
       "format": {{ rs.format|tojson }},
@@ -77,13 +96,18 @@ def transform_xray(source):
 
 
 def transform_singbox(source):
-    if (source.count(SING_SNIFF) != 1 or source.count(SING_BRIDGE) != 1
-            or source.index(SING_SNIFF) > source.index(SING_BRIDGE)):
-        raise ValueError('hiddify-core sniff and bittorrent guard not found')
+    if any(source.count(marker) != 1 for marker in (SING_SNIFF, SING_BRIDGE, SING_DNS, SING_QUIC)):
+        raise ValueError('hiddify-core safeguards or bridge not found')
     if EARLY_SING in source:
         if (source.count(EARLY_SING) == 1 and source.count(SING_BRIDGE) == 1
-                and source.count(SING_LOCAL) == 1 and source.index(EARLY_SING) < source.index(SING_BRIDGE)):
+                and source.count(SING_LOCAL) == 1
+                and source.index(SING_SNIFF) < source.index(SING_DNS) < source.index(SING_QUIC)
+                < source.index(EARLY_SING) < source.index(SING_BRIDGE)):
             return source
         raise ValueError('partially patched hiddify-core template')
+    if not (source.index(SING_SNIFF) < source.index(SING_BRIDGE) < source.index(SING_DNS)
+            < source.index(SING_QUIC)):
+        raise ValueError('unexpected hiddify-core rule order')
     source = replace_once(source, SING_REMOTE, SING_LOCAL)
-    return replace_once(source, SING_BRIDGE, EARLY_SING + SING_BRIDGE)
+    source = replace_once(source, SING_BRIDGE, '')
+    return replace_once(source, SING_QUIC, SING_QUIC + EARLY_SING + SING_BRIDGE)

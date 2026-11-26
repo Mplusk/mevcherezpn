@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from patch import BRIDGE, OLD_DOMAIN, OLD_IP, QUIC, SING_BRIDGE, SING_SNIFF, SING_REMOTE, XRAY_STRATEGY
+from patch import BRIDGE, OLD_DOMAIN, OLD_IP, QUIC, SING_BRIDGE, SING_SNIFF, SING_REMOTE, SING_DNS, SING_QUIC, XRAY_STRATEGY
 from template_install import install, prepare
 
 
@@ -12,7 +12,7 @@ def fixture():
         {'id': 1, 'slug': 'xray/server/base/route', 'is_builtin': True,
          'builtin_override': False, 'content': XRAY_STRATEGY + BRIDGE + QUIC + OLD_IP + OLD_DOMAIN},
         {'id': 2, 'slug': 'hiddify-core/server/base/route', 'is_builtin': True,
-         'builtin_override': False, 'content': SING_REMOTE + SING_SNIFF + SING_BRIDGE},
+         'builtin_override': False, 'content': SING_REMOTE + SING_SNIFF + SING_BRIDGE + SING_DNS + SING_QUIC},
     ]
 
 
