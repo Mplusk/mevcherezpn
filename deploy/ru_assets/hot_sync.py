@@ -19,6 +19,7 @@ import sys
 import tempfile
 
 import sync
+import builtin_geo
 
 CONTAINER = 'gamelife-hiddify-panel-1'
 CRON = '*/10 * * * *'
@@ -120,7 +121,7 @@ def notify_watcher(root, revision):
 
 
 def run(root=sync.ROOT, fetcher=sync.fetch, validator=sync.validate_xray,
-        inspect=inspect_runtime, notify=notify_watcher):
+        inspect=inspect_runtime, notify=notify_watcher, update_builtin=builtin_geo.update):
     before = inspect()
     watched = before['watched']
     def commit(_revision):
@@ -133,7 +134,11 @@ def run(root=sync.ROOT, fetcher=sync.fetch, validator=sync.validate_xray,
         # If a core restarted while publishing, notify its new watcher instead.
         now = inspect()
         notify(root, now['watched'])
-    return sync.sync(root, fetcher, validator, protected=(watched,), on_commit=commit, on_rollback=rollback)
+    revision = sync.sync(root, fetcher, validator, protected=(watched,), on_commit=commit, on_rollback=rollback)
+    # The server-side fallback also uses Xray's built-in RU categories.  Merge
+    # their updated entries without replacing unrelated categories.
+    update_builtin(root, inspect=inspect)
+    return revision
 
 
 if __name__ == '__main__':

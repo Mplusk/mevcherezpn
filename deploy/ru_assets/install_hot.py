@@ -28,7 +28,7 @@ PROFILE = PROFILE_DIR / 'profiles.json'
 SYSTEMD = Path('/etc/systemd/system')
 SERVICE = SYSTEMD / 'gamelife-hot-bootstrap.service'
 TIMER = SYSTEMD / 'gamelife-hot-bootstrap.timer'
-FILES = ('reduce.py', 'sync.py', 'installer.py', 'node_install.py', 'probe_nodes.py',
+FILES = ('reduce.py', 'sync.py', 'builtin_geo.py', 'installer.py', 'node_install.py', 'probe_nodes.py',
          'hot_sync.py', 'idle_gate.py', 'cron_config.py', 'enable_hot.py',
          'patch.py', 'template_install.py', 'apply_monitor.py', 'verify_generated.py')
 MINUTE = {'de': '00', 'pl': '20', 'nl': '40', 'main': '10'}

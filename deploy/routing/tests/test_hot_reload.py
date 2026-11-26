@@ -54,7 +54,7 @@ def replace_link(root, revision):
 
 
 class HotReloadTests(unittest.TestCase):
-    def test_xray_reloads_symlinked_geosite_without_dropping_connection(self):
+    def test_xray_reloads_external_and_builtin_geosite_without_dropping_connection(self):
         if not os.environ.get('REQUIRE_HOT_RELOAD_TESTS'):
             self.skipTest('hot-reload integration tests not enabled')
         binary = os.environ.get('XRAY_BIN')
@@ -74,6 +74,7 @@ class HotReloadTests(unittest.TestCase):
                 (root / 'new').mkdir()
                 (root / 'old' / 'geosite.dat').write_bytes(xr.geosite('RU-BLOCKED', ['old.test']))
                 (root / 'new' / 'geosite.dat').write_bytes(xr.geosite('RU-BLOCKED', ['reload.test']))
+                (root / 'geosite.dat').write_bytes(xr.geosite('CATEGORY-RU', ['old-builtin.test']))
                 (root / 'current').symlink_to('old')
                 with socket.socket() as reserve:
                     reserve.bind(('127.0.0.1', 0))
@@ -81,14 +82,15 @@ class HotReloadTests(unittest.TestCase):
                 config = {
                     'log': {'loglevel': 'error'},
                     'geodata': {'cron': '* * * * *'},
-                    'dns': {'hosts': {'reload.test': '127.0.0.1', 'keep.test': '127.0.0.1'}},
+                    'dns': {'hosts': {'reload.test': '127.0.0.1', 'builtin.test': '127.0.0.1', 'keep.test': '127.0.0.1'}},
                     'inbounds': [{'listen': '127.0.0.1', 'port': port, 'protocol': 'socks',
                                   'settings': {'auth': 'noauth', 'udp': False}}],
                     'outbounds': [{'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'}},
                                   {'tag': 'proxy', 'protocol': 'socks', 'settings': {'servers': [
                                       {'address': '127.0.0.1', 'port': proxy.server_address[1]}]}}],
                     'routing': {'domainStrategy': 'IPIfNonMatch', 'rules': [
-                        {'type': 'field', 'domain': ['ext:current/geosite.dat:ru-blocked'], 'outboundTag': 'proxy'}]},
+                        {'type': 'field', 'domain': ['ext:current/geosite.dat:ru-blocked'], 'outboundTag': 'proxy'},
+                        {'type': 'field', 'domain': ['geosite:category-ru'], 'outboundTag': 'proxy'}]},
                 }
                 env = {key: value for key, value in os.environ.items() if 'proxy' not in key.lower()}
                 env['XRAY_LOCATION_ASSET'] = tmp
@@ -101,17 +103,21 @@ class HotReloadTests(unittest.TestCase):
                     time.sleep(1)
                     self.assertIsNone(proc.poll(), 'Xray failed to start')
                     self.assertEqual(xr.query(port, 'reload.test', direct.server_address[1]), 'DIRECT')
+                    self.assertEqual(xr.query(port, 'builtin.test', direct.server_address[1]), 'DIRECT')
                     held = held_connection(port, echo.server_address[1])
                     held.sendall(b'before')
                     self.assertEqual(xr.readn(held, 6), b'before')
                     replace_link(root, 'new')
+                    (root / 'next-builtin.dat').write_bytes(xr.geosite('CATEGORY-RU', ['builtin.test']))
+                    os.replace(root / 'next-builtin.dat', root / 'geosite.dat')
                     deadline = time.monotonic() + 80
                     while time.monotonic() < deadline:
-                        if xr.query(port, 'reload.test', direct.server_address[1]) == 'PROXY':
+                        if (xr.query(port, 'reload.test', direct.server_address[1]) == 'PROXY'
+                                and xr.query(port, 'builtin.test', direct.server_address[1]) == 'PROXY'):
                             break
                         time.sleep(2)
                     else:
-                        self.fail('Xray did not reload changed geodata on schedule')
+                        self.fail('Xray did not reload both changed geodata files on schedule')
                     self.assertIsNone(proc.poll(), 'Xray exited during reload')
                     held.sendall(b'after')
                     self.assertEqual(xr.readn(held, 5), b'after', 'existing connection was dropped')

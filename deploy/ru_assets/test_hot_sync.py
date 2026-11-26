@@ -50,10 +50,13 @@ class HotSyncTests(unittest.TestCase):
         def notify(root, watched):
             calls.append((watched, os.readlink(root / 'current')))
             hot_sync.notify_watcher(root, watched)
+        updated = []
         new = hot_sync.run(self.root, self.source, lambda _: None,
-                           inspect=lambda: dict(self.identity), notify=notify)
+                           inspect=lambda: dict(self.identity), notify=notify,
+                           update_builtin=lambda root, **_k: updated.append(root))
         self.assertNotEqual(new, self.old)
         self.assertEqual(calls, [(self.old, 'revisions/' + new)])
+        self.assertEqual(updated, [self.root])
         self.assertTrue((self.root / 'revisions' / self.old).is_dir())
 
     def test_failed_notification_restores_selector_and_notifies_again(self):
@@ -65,7 +68,7 @@ class HotSyncTests(unittest.TestCase):
                 raise RuntimeError('notification failed')
         with self.assertRaisesRegex(RuntimeError, 'selector restored'):
             hot_sync.run(self.root, self.source, lambda _: None,
-                         inspect=lambda: dict(self.identity), notify=notify)
+                         inspect=lambda: dict(self.identity), notify=notify, update_builtin=lambda *_a, **_k: None)
         self.assertEqual(os.readlink(self.root / 'current'), 'revisions/' + self.old)
         self.assertEqual(calls[-1], 'revisions/' + self.old)
 
@@ -76,7 +79,8 @@ class HotSyncTests(unittest.TestCase):
         calls = []
         with self.assertRaisesRegex(RuntimeError, 'selector restored'):
             hot_sync.run(self.root, self.source, lambda _: None,
-                         inspect=lambda: next(identities), notify=lambda root, watched: calls.append(watched))
+                         inspect=lambda: next(identities), notify=lambda root, watched: calls.append(watched),
+                         update_builtin=lambda *_a, **_k: None)
         self.assertEqual(os.readlink(self.root / 'current'), 'revisions/' + self.old)
         self.assertEqual(calls, [self.old])
 
