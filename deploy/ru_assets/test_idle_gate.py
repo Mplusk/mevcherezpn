@@ -18,8 +18,7 @@ class GateTests(unittest.TestCase):
         return subprocess.CompletedProcess(args, 0, stdout=b'')
 
     def test_blocks_only_new_syn_and_has_watchdog_before_gate(self):
-        token = 'GL-GEO-0123456789abcdef'
-        with g.IdleGate([12345], [], runner=self.run_command, token=token, sleep=lambda _: None):
+        with g.IdleGate([12345], [], runner=self.run_command, sleep=lambda _: None):
             pass
         commands = [a for a in self.calls if 'iptables' in a or ('-d' in a and 'sh' in a)]
         self.assertEqual(len(commands), 3)

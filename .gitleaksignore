@@ -1,0 +1,2 @@
+# Synthetic firewall rule identifier from a unit test, not a credential.
+b7356f6bbe5c508f4800f8746531f0aed93dd9f7:deploy/ru_assets/test_idle_gate.py:generic-api-key:21
