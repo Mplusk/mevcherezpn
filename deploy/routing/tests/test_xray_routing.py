@@ -141,10 +141,16 @@ class XrayRoutingTests(unittest.TestCase):
                 dns = {'hosts': {name: '127.0.0.1' for name in ('blocked.test', 'russian.test', 'other.test', '2ip.io')}}
                 dns['hosts']['private-blocked.test'] = '198.18.0.9'
                 dns['hosts']['ipblocked.test'] = '203.0.113.5'
+                # A Russian IP behind a non-.ru name need not appear in a
+                # domain list. Clients without working split routing still
+                # need the server to let that request through.
+                dns['hosts']['russian-ip.test'] = '203.0.113.200'
                 inbound = {'listen': '127.0.0.1', 'port': port, 'protocol': 'socks',
                            'settings': {'auth': 'noauth', 'udp': False},
                            'sniffing': {'enabled': True, 'destOverride': ['http', 'tls'], 'routeOnly': True}}
                 direct = {'tag': 'direct', 'protocol': 'freedom', 'settings': {'domainStrategy': 'UseIPv4'}}
+                direct_redirect = {'tag': 'direct', 'protocol': 'freedom', 'settings': {
+                    'redirect': '127.0.0.1:' + str(servers[0].server_address[1])}}
                 proxy = {'tag': 'proxy', 'protocol': 'socks', 'settings': {'servers': [{'address': '127.0.0.1', 'port': servers[1].server_address[1]}]}}
                 block = {'tag': 'block', 'protocol': 'blackhole'}
                 server_rules = [
@@ -159,6 +165,7 @@ class XrayRoutingTests(unittest.TestCase):
                     {'type': 'field', 'domain': ['geosite:ru-blocked'], 'outboundTag': 'proxy'},
                     {'type': 'field', 'ip': ['geoip:ru-blocked'], 'outboundTag': 'proxy'},
                     {'type': 'field', 'domain': ['domain:2ip.io', 'geosite:category-ru'], 'outboundTag': 'direct'},
+                    {'type': 'field', 'ip': ['geoip:ru'], 'outboundTag': 'direct'},
                 ]
                 guard_rules = [dict(rule) for rule in server_rules]
                 guard_rules[2]['outboundTag'] = 'proxy'
@@ -166,8 +173,12 @@ class XrayRoutingTests(unittest.TestCase):
                 for mode, rules, outs, expected in [
                     ('server', server_rules, [direct, block, proxy],
                      {'blocked.test': 'DIRECT', 'russian.test': 'BLOCKED', 'other.test': 'DIRECT', 'private-blocked.test': 'BLOCKED'}),
-                    ('client', client_rules, [proxy, direct, block],
-                     {'blocked.test': 'PROXY', 'russian.test': 'DIRECT', '2ip.io': 'DIRECT', 'other.test': 'PROXY', 'ipblocked.test': 'PROXY'}),
+                    ('server-available', server_rules[:4], [direct_redirect, block, proxy],
+                     {'blocked.test': 'DIRECT', 'russian.test': 'DIRECT', 'russian-ip.test': 'DIRECT',
+                      'other.test': 'DIRECT', 'private-blocked.test': 'BLOCKED'}),
+                    ('client', client_rules, [proxy, direct_redirect, block],
+                     {'blocked.test': 'PROXY', 'russian.test': 'DIRECT', 'russian-ip.test': 'DIRECT',
+                      '2ip.io': 'DIRECT', 'other.test': 'PROXY', 'ipblocked.test': 'PROXY'}),
                     ('guard', guard_rules, [direct, block, proxy],
                      {'blocked.test': 'PROXY', 'private-blocked.test': 'BLOCKED', 'ipblocked.test': 'PROXY'}),
                     ('guard-unsafe', guard_rules, [direct, block, proxy],
@@ -175,7 +186,7 @@ class XrayRoutingTests(unittest.TestCase):
                 ]:
                     with self.subTest(mode=mode):
                         config = {'log': {'loglevel': 'none'}, 'dns': dns, 'inbounds': [inbound],
-                                  'outbounds': outs, 'routing': {'domainStrategy': 'IPOnDemand' if mode in ('server', 'guard') else 'IPIfNonMatch', 'rules': rules}}
+                                  'outbounds': outs, 'routing': {'domainStrategy': 'IPOnDemand' if mode in ('server', 'server-available', 'guard') else 'IPIfNonMatch', 'rules': rules}}
                         env = {k: v for k, v in os.environ.items() if 'proxy' not in k.lower()}
                         env['XRAY_LOCATION_ASSET'] = temp
                         proc = subprocess.Popen([executable, 'run', '-c', 'stdin:'], stdin=subprocess.PIPE,
@@ -188,7 +199,7 @@ class XrayRoutingTests(unittest.TestCase):
                                 self.fail('Xray did not start: ' + proc.stdout.read().decode(errors='replace'))
                             for host, result in expected.items():
                                 self.assertEqual(query(port, host, servers[0].server_address[1]), result, host)
-                            if mode == 'server':
+                            if mode in ('server', 'server-available'):
                                 self.assertEqual(query(port, 'blocked.test', servers[0].server_address[1], torrent=True), 'BLOCKED', 'BitTorrent must be blocked before allowed domains')
                         finally:
                             proc.terminate()
