@@ -77,7 +77,9 @@ def run_node(host, key, expected, action):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--key', type=Path, required=True)
-    parser.add_argument('--execute', action='store_true', help='actually start sync sequentially')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--execute', action='store_true', help='actually start sync sequentially')
+    mode.add_argument('--verify-only', action='store_true', help='check all active hashes without syncing')
     args = parser.parse_args()
     if not args.key.is_file():
         raise ValueError('SSH key unavailable')
@@ -85,6 +87,13 @@ def main():
     for host in HOSTS:
         run_node(host, args.key, expected, 'check')
         print('PREFLIGHT_OK ' + host, flush=True)
+    if args.verify_only:
+        for host in HOSTS:
+            run_node(host, args.key, expected, 'verify')
+        if manifest() != expected:
+            raise RuntimeError('public manifest changed')
+        print('ALL_NODES_MATCH', flush=True)
+        return
     if not args.execute:
         print('DRY_RUN_OK')
         return

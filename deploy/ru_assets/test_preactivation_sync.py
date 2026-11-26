@@ -54,6 +54,16 @@ class ControllerTests(unittest.TestCase):
                             [{'revision': 'fixed'}], execute=False)
         self.assertEqual(calls, ['check'] * 4)
 
+    def test_verify_only_does_not_start_sync(self):
+        calls = []
+        args = ['sync', '--key', str(self.key), '--verify-only']
+        with mock.patch.object(sys, 'argv', args), \
+             mock.patch.object(sync, 'run_node', side_effect=lambda host, key, expected, action: calls.append(action)), \
+             mock.patch.object(sync, 'manifest', return_value={'revision': 'fixed'}), \
+             contextlib.redirect_stdout(io.StringIO()):
+            sync.main()
+        self.assertEqual(calls, ['check'] * 4 + ['verify'] * 4)
+
 
 if __name__ == '__main__':
     unittest.main()
