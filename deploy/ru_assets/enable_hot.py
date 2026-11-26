@@ -18,6 +18,9 @@ import subprocess
 import sys
 import tempfile
 
+# Keep versioned deployment directories free of new bytecode artifacts.
+sys.dont_write_bytecode = True
+
 # Source checkout keeps the panel helpers next door; the installed bundle
 # puts the same reviewed helper files in this script's directory.
 GUARD = Path(__file__).resolve().parent.parent / 'ru_guard'

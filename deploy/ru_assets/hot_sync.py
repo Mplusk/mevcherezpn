@@ -18,6 +18,9 @@ import subprocess
 import sys
 import tempfile
 
+# Keep versioned deployment directories free of new bytecode artifacts.
+sys.dont_write_bytecode = True
+
 import sync
 import builtin_geo
 
