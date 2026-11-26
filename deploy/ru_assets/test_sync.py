@@ -121,6 +121,33 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(calls.count('manifest.json'), 6)
         self.assertEqual(os.readlink(self.root / 'current'), 'revisions/' + first)
 
+    def test_failed_live_notification_restores_previous_revision(self):
+        first = sync.sync(self.root, self.source, lambda _: None)
+        self.data['geosite.dat'] = dat(sync.RULES['geosite.dat']) + dat({'EXTRA'})
+        calls = []
+        def fail(_revision):
+            calls.append('commit')
+            raise RuntimeError('watcher failed')
+        with self.assertRaisesRegex(RuntimeError, 'selector restored'):
+            sync.sync(self.root, self.source, lambda _: None, protected=(first,),
+                      on_commit=fail, on_rollback=lambda: calls.append('rollback'))
+        self.assertEqual(os.readlink(self.root / 'current'), 'revisions/' + first)
+        self.assertEqual(calls, ['commit', 'rollback'])
+
+    def test_cleanup_keeps_the_directory_watched_by_the_running_core(self):
+        first = sync.sync(self.root, self.source, lambda _: None)
+        revisions = self.root / 'revisions'
+        for number in range(1, 11):
+            path = revisions / ('%064x' % number)
+            path.mkdir(mode=0o755)
+            for name in sync.FILES:
+                (path / name).write_bytes(b'public')
+            os.utime(path, ns=(number, number))
+        old = revisions / first
+        os.utime(old, ns=(1, 1))
+        sync.cleanup(revisions, '%064x' % 10, protected=(first,))
+        self.assertTrue(old.is_dir())
+
     def test_cleanup_retains_active_and_recent_and_never_follows_symlinks(self):
         active = sync.sync(self.root, self.source, lambda _: None)
         revisions = self.root / 'revisions'

@@ -2,6 +2,7 @@
 
 import base64
 import json
+from pathlib import Path
 import re
 
 
@@ -28,11 +29,30 @@ PROFILE = {
     "FakeDNS": "false",
 }
 _HAPP = re.compile(r"^Happ(?:/|\s|$)", re.IGNORECASE)
+GEO_ROOT = Path("/opt/hiddify-manager/services/xray/bin/gamelife/current")
+
+
+def last_geodata_update():
+    """Expose the current downloaded DAT revision's timestamp to Happ.
+
+    Existing revision files are immutable, so repeated subscription requests
+    do not force a download when their contents have not changed. Failure to
+    read the optional timestamp must not break subscription delivery.
+    """
+    try:
+        timestamp = max((GEO_ROOT / name).stat().st_mtime for name in ("geoip.dat", "geosite.dat"))
+        return str(int(timestamp)) if timestamp > 0 else None
+    except (OSError, OverflowError, ValueError):
+        return None
 
 
 def add_routing_header(response, user_agent):
     """Only Happ receives the routing command; never include user secrets."""
     if _HAPP.match(user_agent or ""):
-        profile = json.dumps(PROFILE, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        profile_data = PROFILE.copy()
+        updated = last_geodata_update()
+        if updated is not None:
+            profile_data["LastUpdated"] = updated
+        profile = json.dumps(profile_data, ensure_ascii=True, separators=(",", ":")).encode("ascii")
         response.headers["routing"] = "happ://routing/onadd/" + base64.b64encode(profile).decode("ascii")
     return response

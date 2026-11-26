@@ -159,7 +159,7 @@ def validate_xray(data, runner=subprocess.run):
         raise ValueError('Xray or Hiddify rejected candidate assets')
 
 
-def cleanup(revisions, active, keep=7):
+def cleanup(revisions, active, keep=7, protected=()):
     """Remove only known owned regular files in old content-addressed dirs."""
     if keep < 7:
         raise ValueError('must retain at least seven revisions')
@@ -171,7 +171,9 @@ def cleanup(revisions, active, keep=7):
         if stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid() and not info.st_mode & 0o022:
             candidates.append((info.st_mtime_ns, path))
     candidates.sort(key=lambda pair: pair[0], reverse=True)
-    retained = {path.name for _, path in candidates[:keep]} | {active}
+    if any(not isinstance(name, str) or not re.fullmatch('[0-9a-f]{64}', name) for name in protected):
+        raise ValueError('invalid protected revision')
+    retained = {path.name for _, path in candidates[:keep]} | {active} | set(protected)
     for _, path in candidates:
         if path.name in retained:
             continue
@@ -186,15 +188,19 @@ def cleanup(revisions, active, keep=7):
         path.rmdir()
 
 
-def _sync_locked(root, fetcher, validator):
+def _sync_locked(root, fetcher, validator, *, protected=(), on_commit=None, on_rollback=None):
     revisions = root / 'revisions'
     safe_directory(revisions, 0o755)
     current = root / 'current'
+    previous = None
     if current.exists() or current.is_symlink():
         if not current.is_symlink() or not re.fullmatch(r'revisions/[0-9a-f]{64}', os.readlink(current)):
             raise ValueError('unsafe current link')
         if current.resolve(strict=True).parent != revisions.resolve(strict=True):
             raise ValueError('current link escapes revisions')
+        previous = os.readlink(current)
+    if any(not isinstance(name, str) or not re.fullmatch('[0-9a-f]{64}', name) for name in protected):
+        raise ValueError('invalid protected revision')
 
     # All downloads and validations happen before the public selector changes.
     data, revision = fetch_consistent(fetcher)
@@ -228,11 +234,31 @@ def _sync_locked(root, fetcher, validator):
     finally:
         if link.is_symlink():
             link.unlink()
-    cleanup(revisions, revision)
+    try:
+        if on_commit is not None:
+            on_commit(revision)
+    except Exception as error:
+        if previous is None:
+            current.unlink()
+        else:
+            rollback = root / ('.rollback-' + os.urandom(12).hex())
+            try:
+                os.symlink(previous, rollback)
+                os.replace(rollback, current)
+            finally:
+                if rollback.is_symlink():
+                    rollback.unlink()
+        if on_rollback is not None:
+            try:
+                on_rollback()
+            except Exception as rollback_error:
+                raise RuntimeError('asset rollback notification failed') from rollback_error
+        raise RuntimeError('asset activation failed; selector restored') from error
+    cleanup(revisions, revision, protected=protected)
     return revision
 
 
-def sync(root=ROOT, fetcher=fetch, validator=validate_xray):
+def sync(root=ROOT, fetcher=fetch, validator=validate_xray, *, protected=(), on_commit=None, on_rollback=None):
     """Previous current remains selected after any download/validation failure."""
     root = Path(root)
     safe_directory(root, 0o755)
@@ -243,7 +269,7 @@ def sync(root=ROOT, fetcher=fetch, validator=validate_xray):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise ValueError('unsafe sync lock')
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _sync_locked(root, fetcher, validator)
+        return _sync_locked(root, fetcher, validator, protected=protected, on_commit=on_commit, on_rollback=on_rollback)
     finally:
         os.close(fd)
 

@@ -22,7 +22,8 @@ jobs:
             -m unittest discover -s . -p 'test_*.py' -v
           docker run --rm --network none --read-only --cap-drop ALL \
             --tmpfs /tmp:rw,nosuid,nodev,mode=1777 -e PYTHONDONTWRITEBYTECODE=1 \
-            -v "$PWD/deploy/ru_assets:/work:ro" -w /work \
+            -v "$PWD/deploy/ru_guard:/work/deploy/ru_guard:ro" \
+            -v "$PWD/deploy/ru_assets:/work/deploy/ru_assets:ro" -w /work/deploy/ru_assets \
             --entrypoint /opt/hiddify-manager/.venv313/bin/python \
             ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9 \
             -m unittest discover -s . -p 'test_*.py' -v
@@ -38,14 +39,15 @@ jobs:
           curl -fsSL --retry 3 "$geo_base/rule-set-geoip/geoip-ru-blocked.srs" -o "$RUNNER_TEMP/official-srs/geoip-ru-blocked.srs"
           echo '28da75296f79cdc541cf21ae19f5aa1b03bc948572c4d4dc2f33532c372991ff  '"$RUNNER_TEMP/official-srs/geosite-ru-blocked.srs" | sha256sum -c -
           echo '3b8c597366bf4e4fe01a2eb7b8dc8f20fdf25a669da8aca69697b725b2e68050  '"$RUNNER_TEMP/official-srs/geoip-ru-blocked.srs" | sha256sum -c -
-          docker run --rm --network none \
+          docker run --rm --network none --read-only --cap-drop ALL --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
             -e HIDDIFY_PANEL_CORE=/usr/bin/hiddify-core -e REQUIRE_SING_GUARD_TESTS=1 \
             -e TEST_SRS_DIR=/opt/hiddify-manager/services/xray/bin/gamelife/current -e REQUIRE_LOCAL_SRS_TESTS=1 \
-            -v "$PWD/deploy/routing/tests/test_sing_guard.py:/tmp/test_sing_guard.py:ro" \
+            -e XRAY_BIN=/opt/hiddify-manager/services/xray/bin/xray -e REQUIRE_HOT_RELOAD_TESTS=1 \
+            -v "$PWD/deploy/routing/tests:/tmp/tests:ro" -w /tmp/tests \
             -v "$RUNNER_TEMP/official-srs:/opt/hiddify-manager/services/xray/bin/gamelife/current:ro" \
             --entrypoint /opt/hiddify-manager/.venv313/bin/python \
             ghcr.io/hiddify/hiddify-manager:v14.2.0@sha256:399c248e20d139a7dab9cf05566751bcbbce30b3a03ae832525e95dfb78333c9 \
-            /tmp/test_sing_guard.py
+            -m unittest -v test_sing_guard test_hot_reload
   vpn_monitor:
     runs-on: ubuntu-latest
     steps:

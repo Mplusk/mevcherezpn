@@ -1,0 +1,263 @@
+"""Install the idle-only bootstrap and hot updater without restarting VPNs.
+
+The monitoring profiles arrive on stdin, are validated, and are written only
+to a root-owned 0600 file. Code revisions are public, immutable and selected
+atomically. The bootstrap timer operates one node at a time in staggered slots.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+
+import enable_hot
+import node_install
+
+ROOT = Path('/root/services/gamelife-vpn')
+ASSETS = ROOT / 'ru-assets'
+OPT = Path('/opt/gamelife-ru-assets')
+HOT = OPT / 'hot'
+PROFILE_DIR = Path('/etc/gamelife-ru-assets')
+PROFILE = PROFILE_DIR / 'profiles.json'
+SYSTEMD = Path('/etc/systemd/system')
+SERVICE = SYSTEMD / 'gamelife-hot-bootstrap.service'
+TIMER = SYSTEMD / 'gamelife-hot-bootstrap.timer'
+FILES = ('reduce.py', 'sync.py', 'installer.py', 'node_install.py', 'probe_nodes.py',
+         'hot_sync.py', 'idle_gate.py', 'cron_config.py', 'enable_hot.py',
+         'patch.py', 'template_install.py', 'apply_monitor.py', 'verify_generated.py')
+MINUTE = {'de': '00', 'pl': '20', 'nl': '40', 'main': '10'}
+OLD_SYNC = '565756ad04d615c16c6f95891c10a1645dca7ce5e29e48e0f8493eb083a79806'
+OLD_REDUCE = 'b456097536a721d2157207e4ee7e2a8566240b10453ec0eac575f178ad19415b'
+
+
+def secure_dir(path, mode=0o700):
+    path.mkdir(mode=mode, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe installation directory')
+
+
+def secure_read(path, max_size=1024 * 1024):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or info.st_size > max_size:
+        raise ValueError('unsafe installation file')
+    return path.read_bytes()
+
+
+def atomic(path, data, mode):
+    fd, name = tempfile.mkstemp(prefix='.hot-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+        fd = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def service_text(node):
+    if node not in MINUTE:
+        raise ValueError('unknown node')
+    return ('''[Unit]
+Description=Enable VPN geodata hot reload only while the node is idle
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+TimeoutStartSec=1350
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/services/gamelife-vpn/ru-assets /etc/systemd/system
+ExecStart=/usr/bin/python3 /opt/gamelife-ru-assets/hot/current/enable_hot.py ''' + node + '\n').encode()
+
+
+def timer_text(node):
+    if node not in MINUTE:
+        raise ValueError('unknown node')
+    return ('''[Unit]
+Description=Try enabling VPN geodata hot reload during the node's idle slot
+
+[Timer]
+OnCalendar=*-*-* *:'''+ MINUTE[node] + ''':00 UTC
+Persistent=false
+Unit=gamelife-hot-bootstrap.service
+
+[Install]
+WantedBy=timers.target
+''').encode()
+
+
+def validate_profiles(data):
+    if not isinstance(data, dict) or set(data) != set(node_install.NODES):
+        raise ValueError('unexpected monitoring profiles')
+    for name, outbound in data.items():
+        node_install.validate_request({'action': 'stage', 'node': name, 'outbound': outbound})
+
+
+def validate_identity(node):
+    if node not in MINUTE:
+        raise ValueError('unknown node')
+    state = ROOT / ('admin-access.json' if node == 'main' else 'node-access.json')
+    info = state.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('unsafe node state')
+    data = json.loads(state.read_text(encoding='utf-8'))
+    if node != 'main' and data.get('node_domain') != node_install.NODES[node][0]:
+        raise ValueError('node identity mismatch')
+    if node == 'main' and (ROOT / 'node-access.json').exists():
+        raise ValueError('ambiguous main node')
+
+
+def source_files(directory):
+    data = {}
+    for name in FILES:
+        data[name] = secure_read(Path(directory) / name)
+        if not data[name]:
+            raise ValueError('empty source file')
+    return data
+
+
+def restore(path, previous, mode):
+    if previous is None:
+        if path.exists() or path.is_symlink():
+            path.unlink()
+    else:
+        atomic(path, previous, mode)
+
+
+def install(node, profiles, directory=None):
+    if os.geteuid() != 0:
+        raise ValueError('root required')
+    validate_identity(node)
+    validate_profiles(profiles)
+    directory = Path(directory or Path(__file__).resolve().parent)
+    sources = source_files(directory)
+    for name, expected in (('sync.py', OLD_SYNC), ('reduce.py', OLD_REDUCE)):
+        current = secure_read(OPT / name)
+        if hashlib.sha256(current).hexdigest() != expected:
+            raise ValueError('existing asset updater differs')
+    # Never overwrite unrelated or hand-edited service units.
+    for path, value in ((SERVICE, service_text(node)), (TIMER, timer_text(node))):
+        if path.exists() or path.is_symlink():
+            if secure_read(path) != value:
+                raise ValueError('existing bootstrap unit differs')
+    handles = enable_hot.locks(node)
+    timer_previously_enabled = False
+    previous_link = None
+    previous_profile = None
+    old_service = old_timer = None
+    touched_profile = touched_link = touched_service = touched_timer = timer_attempted = False
+    try:
+        secure_dir(OPT)
+        secure_dir(HOT)
+        revisions = HOT / 'releases'
+        secure_dir(revisions)
+        secure_dir(PROFILE_DIR)
+        if PROFILE.exists() or PROFILE.is_symlink():
+            info = PROFILE.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+                raise ValueError('unsafe existing profiles')
+            previous_profile = PROFILE.read_bytes()
+        for path, target in ((SERVICE, 'service'), (TIMER, 'timer')):
+            if path.exists():
+                if target == 'service': old_service = path.read_bytes()
+                else: old_timer = path.read_bytes()
+        timer_previously_enabled = subprocess.run(['systemctl', 'is-enabled', '--quiet', TIMER.name],
+                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                  timeout=30, check=False).returncode == 0
+        current_link = HOT / 'current'
+        if current_link.exists() or current_link.is_symlink():
+            if not current_link.is_symlink() or not re.fullmatch(r'releases/[0-9a-f]{64}', os.readlink(current_link)):
+                raise ValueError('unsafe hot-code selector')
+            previous_link = os.readlink(current_link)
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}
+        revision = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+        target = revisions / revision
+        if not target.exists():
+            with tempfile.TemporaryDirectory(prefix='.stage-', dir=revisions) as temp:
+                stage = Path(temp) / 'code'
+                stage.mkdir(mode=0o700)
+                for name, data in sources.items():
+                    atomic(stage / name, data, 0o644)
+                os.rename(stage, target)
+        secure_dir(target)
+        if set(p.name for p in target.iterdir()) != set(FILES):
+            raise ValueError('unexpected installed code contents')
+        for name, data in sources.items():
+            if secure_read(target / name) != data:
+                raise ValueError('installed code differs')
+        touched_profile = True
+        atomic(PROFILE, json.dumps(profiles, separators=(',', ':')).encode(), 0o600)
+        link = HOT / ('.current-' + os.urandom(12).hex())
+        try:
+            os.symlink('releases/' + revision, link)
+            touched_link = True
+            os.replace(link, current_link)
+        finally:
+            if link.is_symlink(): link.unlink()
+        touched_service = True
+        atomic(SERVICE, service_text(node), 0o644)
+        touched_timer = True
+        atomic(TIMER, timer_text(node), 0o644)
+        subprocess.run(['systemctl', 'daemon-reload'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=45, check=True)
+        timer_attempted = True
+        # Arm the timer at boot. The rollout starts it after every node has
+        # received and validated the bundle, avoiding overlapping bootstrap.
+        subprocess.run(['systemctl', 'enable', TIMER.name], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=45, check=True)
+        return revision
+    except Exception:
+        if timer_attempted and not timer_previously_enabled:
+            subprocess.run(['systemctl', 'disable', '--now', TIMER.name], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=45, check=False)
+        if touched_link and HOT.exists():
+            current_link = HOT / 'current'
+            if previous_link is None:
+                if current_link.is_symlink(): current_link.unlink()
+            else:
+                rollback = HOT / ('.rollback-' + os.urandom(12).hex())
+                os.symlink(previous_link, rollback)
+                os.replace(rollback, current_link)
+        if touched_profile: restore(PROFILE, previous_profile, 0o600)
+        if touched_service: restore(SERVICE, old_service, 0o644)
+        if touched_timer: restore(TIMER, old_timer, 0o644)
+        if touched_service or touched_timer:
+            subprocess.run(['systemctl', 'daemon-reload'], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=45, check=False)
+        raise
+    finally:
+        for fd in reversed(handles): os.close(fd)
+
+
+if __name__ == '__main__':
+    try:
+        if len(sys.argv) != 2:
+            raise ValueError('node name required')
+        data = sys.stdin.buffer.read(256 * 1024 + 1)
+        if len(data) > 256 * 1024:
+            raise ValueError('profiles too large')
+        revision = install(sys.argv[1], json.loads(data))
+        print('HOT_INSTALL_OK ' + revision[:12])
+    except Exception as error:
+        print('HOT_INSTALL_FAILED ' + type(error).__name__, file=sys.stderr)
+        raise SystemExit(1)

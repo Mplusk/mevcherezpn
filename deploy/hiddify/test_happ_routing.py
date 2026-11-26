@@ -1,8 +1,13 @@
 import base64
 import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import happ_routing
 from happ_routing import PROFILE, add_routing_header
 from install_auto_profile import HEADERS_NEW, HEADERS_OLD, NEW, OLD, transform_source
 
@@ -30,6 +35,29 @@ class HappRoutingTests(unittest.TestCase):
             response = SimpleNamespace(headers={})
             add_routing_header(response, user_agent)
             self.assertNotIn("routing", response.headers)
+
+    def test_happ_receives_stable_geodata_timestamp_and_updates_with_revision(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(happ_routing, "GEO_ROOT", Path(tmp)):
+            for name in ("geosite.dat", "geoip.dat"):
+                path = Path(tmp) / name
+                path.write_bytes(b"fixture")
+                os.utime(path, (1700000000, 1700000000))
+            def received():
+                response = SimpleNamespace(headers={})
+                add_routing_header(response, "Happ/5.2.0")
+                return json.loads(base64.b64decode(response.headers["routing"][len("happ://routing/onadd/"):]))
+            self.assertEqual(received()["LastUpdated"], "1700000000")
+            self.assertEqual(received()["LastUpdated"], "1700000000")
+            os.utime(Path(tmp) / "geosite.dat", (1700000123, 1700000123))
+            self.assertEqual(received()["LastUpdated"], "1700000123")
+            self.assertNotIn("LastUpdated", PROFILE)
+
+    def test_missing_geodata_does_not_break_subscription(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(happ_routing, "GEO_ROOT", Path(tmp)):
+            response = SimpleNamespace(headers={})
+            add_routing_header(response, "Happ/5.2.0")
+            actual = json.loads(base64.b64decode(response.headers["routing"][len("happ://routing/onadd/"):]))
+            self.assertEqual(actual, PROFILE)
 
     def test_install_from_original_and_previous_hook_is_idempotent(self):
         original = "def a(self, core, c):\n" + OLD + "\ndef add_headers(c):\n" + HEADERS_OLD
